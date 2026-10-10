@@ -48,8 +48,7 @@ class MusicXMLTests(unittest.TestCase):
     def test_voice_selection(self):
         content=note(extra='<voice>1</voice><staff>1</staff>')
         content+='<backup><duration>1</duration></backup>'+note('E',extra='<voice>2</voice><staff>2</staff>')
-        with self.assertRaisesRegex(ValueError, "select"):
-            self.load(score(content))
+        self.assertEqual(self.load(score(content)).events[0].pitches,(60,64))
         self.assertEqual(self.load(score(content), staff="2", voice="2").notes,(64,))
         with self.assertRaisesRegex(ValueError, "No playable"):
             self.load(score(content),staff="3")

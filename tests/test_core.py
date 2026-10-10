@@ -23,11 +23,11 @@ class TutorTests(unittest.TestCase):
         self.assertIn("Exercise complete", tutor.observe(events[4]))
         self.assertEqual(tutor.position, 2)
 
-    def test_midi_releases_and_other_messages_are_ignored(self):
+    def test_midi_releases_are_preserved_and_other_messages_are_ignored(self):
         for message in [SimpleNamespace(type="note_off", note=60, velocity=90),
-                        SimpleNamespace(type="note_on", note=60, velocity=0),
-                        SimpleNamespace(type="clock")]:
-            self.assertIsNone(event_from_message(message))
+                        SimpleNamespace(type="note_on", note=60, velocity=0)]:
+            self.assertEqual(event_from_message(message).kind, "note_off")
+        self.assertIsNone(event_from_message(SimpleNamespace(type="clock")))
         event = event_from_message(SimpleNamespace(type="note_on", note=60, velocity=100))
         self.assertEqual((event.note, event.velocity, event.source), (60, 100, "midi"))
 
