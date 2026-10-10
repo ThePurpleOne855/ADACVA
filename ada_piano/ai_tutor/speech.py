@@ -11,7 +11,7 @@ class Feedback:
                 self.engine.setProperty("rate", 165)
             except Exception as exc:
                 raise RuntimeError(
-                    'Speech unavailable. Install ".[speech]" and a system voice '
+                    'Speech unavailable. Run uv sync --extra speech and install a system voice '
                     '(Linux: eSpeak NG), or omit --speak for text mode.'
                 ) from exc
 

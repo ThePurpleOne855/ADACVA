@@ -4,27 +4,40 @@ Accessible Piano Learning Assistant: a Python hackathon prototype for blind and 
 
 ## Start here (2 minutes once dependencies are available)
 
-The simulated demo needs Python 3.11+ and no third-party packages, piano, camera, or API key:
+After installing [uv](https://docs.astral.sh/uv/getting-started/installation/), run the simulated demo. It needs no piano, camera, or API key:
 
 ```sh
-python -m ada_piano demo
+uv run python -m ada_piano demo
 ```
 
-Use `python3` if your system does not have a `python` command. The demo plays simulated MIDI numbers `60, 61, 62, 64, 65, 67`: C, an intentionally wrong C sharp, then D, E, F, G. The tutor corrects the mistake and finishes the exercise. This is text output; enable local speech after installing its dependencies.
+uv manages Python and the local `.venv` automatically; no environment activation is needed. The first run needs network access to resolve packages and install the project. The demo plays simulated MIDI numbers `60, 61, 62, 64, 65, 67`: C, an intentionally wrong C sharp, then D, E, F, G. The tutor corrects the mistake and finishes the exercise. This is text output; enable local speech after installing its dependencies.
 
 ## Set up dependencies (5–10 minutes)
 
-1. Create a local environment: `python -m venv .venv`.
-2. Activate it: macOS/Linux `source .venv/bin/activate`; Windows PowerShell `.venv\Scripts\Activate.ps1`.
-3. Install: `python -m pip install -e ".[hardware]"`.
-4. Run checks: `python -m unittest discover -s tests -v`.
-5. Try speech: `python -m ada_piano demo --speak`.
+1. Check uv is available: `uv --version`.
+2. Install the hardware dependencies: `uv sync --extra hardware`.
+3. Run checks: `uv run python -m unittest discover -s tests -v`.
+4. Try speech: `uv run --extra speech python -m ada_piano demo --speak`.
 
-Optional groups let you install one input at a time: `.[camera]`, `.[midi]`, or `.[speech]`. The base application has no external runtime dependencies. Python 3.11 or 3.12 is a conservative starting choice for future computer-vision additions; native package availability depends on your operating system and Python version.
+Use `uv sync` for the base project, or select individual extras with `uv sync --extra camera`, `uv sync --extra midi`, or `uv sync --extra speech`. The base application has no external runtime dependencies. `.python-version` selects Python 3.12 for development; the package still supports Python 3.11+. uv can download the selected interpreter if needed. Native dependencies still require validation on the demo operating system.
+
+### Dependency workflow
+
+`pyproject.toml` remains the dependency source, and setuptools remains the build backend. uv manages installation, the virtual environment, and dependency locking. See the [uv project guide](https://docs.astral.sh/uv/guides/projects/).
+
+- Add a dependency with `uv add PACKAGE`; use `uv add --optional camera PACKAGE` for an optional camera dependency.
+- Generate or refresh the lockfile with `uv lock`. Commit `uv.lock` alongside dependency changes.
+- Once the lockfile exists, reproduce the hardware environment with `uv sync --locked --extra hardware`.
+- Upgrade one dependency deliberately with `uv lock --upgrade-package PACKAGE`.
+
+**Current setup limitation:** this workspace cannot resolve `pypi.org`, so `uv.lock` could not be generated and a full sync has not been verified. Run `uv sync --extra hardware` on a network-connected computer to generate the lockfile and install dependencies. Do not use `--locked` until that lockfile exists.
+
+For an offline core demo with Python already installed, `python -m ada_piano demo` still works directly from the repository. This bypasses uv dependency synchronization and does not verify hardware dependencies.
 
 | Dependency | Purpose |
 | --- | --- |
 | OpenCV | Capture webcam frames |
+| MediaPipe | Hand landmark detection (included in camera and hardware extras; integration in progress) |
 | Mido + python-rtmidi | Receive key events through a USB-to-MIDI interface |
 | pyttsx3 | Speak feedback locally using a system voice |
 | Python standard library | Exercises, tutor logic, CLI, tests |
@@ -47,11 +60,11 @@ The current tutor is rule based, not an AI model. It evaluates single notes in s
 ## Test each part separately
 
 ```sh
-python -m ada_piano sheet
-python -m ada_piano camera --seconds 5
-python -m ada_piano midi-ports
-python -m ada_piano midi-monitor --port "EXACT INPUT NAME"
-python -m ada_piano practice --port "EXACT INPUT NAME" --speak
+uv run python -m ada_piano sheet
+uv run --extra camera python -m ada_piano camera --seconds 5
+uv run --extra midi python -m ada_piano midi-ports
+uv run --extra midi python -m ada_piano midi-monitor --port "EXACT INPUT NAME"
+uv run --extra hardware python -m ada_piano practice --port "EXACT INPUT NAME" --speak
 ```
 
 The camera command prints its result without requiring a visual window. Add `--preview` for a sighted setup helper; use `--index 1` for another webcam. Press Control C to stop monitoring or practice. CLI text works with a terminal screen reader; screen-reader usability still needs testing with a learner.
@@ -67,7 +80,7 @@ No separate digital audio workstation is required for this prototype: Mido and p
 Copy `ada_piano/exercises/five_notes.json`, edit its title and notes, then run:
 
 ```sh
-python -m ada_piano demo --exercise my_exercise.json --notes 60 62 64
+uv run python -m ada_piano demo --exercise my_exercise.json --notes 60 62 64
 ```
 
 Each note is an integer from 0–127; this project names MIDI 60 as C4 (middle C). At least one note is required. Sharps are spelled out in feedback for speech.
