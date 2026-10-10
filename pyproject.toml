@@ -23,7 +23,6 @@ include = ["ada_piano*"]
 
 [tool.setuptools.package-data]
 ada_piano = ["exercises/*.json", "exercises/*.musicxml"]
-ada_piano = ["exercises/*.json"]
 
 [tool.pyright]
 venvPath = "."
