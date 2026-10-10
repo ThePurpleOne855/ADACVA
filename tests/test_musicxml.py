@@ -17,6 +17,12 @@ def score(content, namespace=""):
     return f'<score-partwise {namespace}><work><work-title>Imported melody</work-title></work><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions></attributes>{content}</measure></part></score-partwise>'
 
 
+def measures(*contents):
+    xml = score(contents[0])
+    rest = ''.join(f'<measure number="X{i}">{content}</measure>' for i, content in enumerate(contents[1:], 2))
+    return xml.replace('</part></score-partwise>', rest+'</part></score-partwise>')
+
+
 class MusicXMLTests(unittest.TestCase):
     def setUp(self):
         self.temp = TemporaryDirectory()
@@ -94,3 +100,55 @@ class MusicXMLTests(unittest.TestCase):
         self.assertIn('C4, D4',out.getvalue())
         self.assertIn('Exercise complete',out.getvalue())
         self.assertIn('rhythm and rests are not graded',out.getvalue().lower())
+
+    def test_measure_range_is_inclusive_and_uses_positions(self):
+        xml=measures(note(),note('D'),note('E'))
+        result=self.load(xml,start_measure=2,end_measure=3)
+        self.assertEqual(result.notes,(62,64))
+        self.assertIn('score labels X2–X3',result.title)
+        self.assertEqual(self.load(xml,end_measure=1).notes,(60,))
+        self.assertEqual(self.load(xml,start_measure=3).notes,(64,))
+        self.assertEqual(self.load(xml,start_measure=2,end_measure=2).notes,(62,))
+
+    def test_range_excludes_later_unsupported_features(self):
+        xml=measures(note(),note('D'),'<barline><repeat direction="backward"/></barline>'+note(extra='<chord/>'))
+        self.assertEqual(self.load(xml,end_measure=2).notes,(60,62))
+        with self.assertRaisesRegex(ValueError,'repeat'):
+            self.load(xml,end_measure=3)
+
+    def test_invalid_ranges_and_json_selection(self):
+        for start,end in [(0,1),(-1,1),(2,1),(1,4),(True,2),(1,1.5)]:
+            with self.subTest(start=start,end=end),self.assertRaisesRegex(ValueError,'range'):
+                self.load(measures(note(),note()),start_measure=start,end_measure=end)
+        path=Path(self.temp.name)/'test.json'
+        path.write_text('{"title":"Test","notes":[60]}')
+        with self.assertRaisesRegex(ValueError,'only to MusicXML'):
+            load_exercise(path,end_measure=1)
+
+    def test_inherited_divisions_and_pitch_state(self):
+        # First two notes use inherited divisions=2, next uses new divisions=1.
+        # A backup of 2 then puts another selected note exactly after them.
+        content=note()+note('D')+'<attributes><divisions>1</divisions></attributes>'+note('E').replace('<duration>1','<duration>2')+'<backup><duration>2</duration></backup>'+note('F')
+        xml=measures('<attributes><divisions>2</divisions></attributes>'+note(),content)
+        with self.assertRaisesRegex(ValueError,'Overlapping'):
+            self.load(xml,start_measure=2,voice='1')
+        for tag in ['<transpose><chromatic>2</chromatic></transpose>','<octave-shift type="up"/>']:
+            with self.subTest(tag=tag),self.assertRaisesRegex(ValueError,'inherited'):
+                self.load(measures('<attributes>'+tag+'</attributes>'+note(),note()),start_measure=2)
+
+    def test_range_does_not_silently_cut_ties(self):
+        xml=measures(note(extra='<tie type="start"/>'),note(extra='<tie type="stop"/>'))
+        self.assertEqual(self.load(xml,start_measure=1,end_measure=2).notes,(60,))
+        with self.assertRaisesRegex(ValueError,'extend the end'):
+            self.load(xml,end_measure=1)
+        with self.assertRaisesRegex(ValueError,'extend its start'):
+            self.load(xml,start_measure=2)
+
+    def test_range_cli(self):
+        self.load(measures(note(),note('D'),note('E')))
+        out=io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(['sheet','--exercise',str(self.path),'--start-measure','2','--end-measure','2']),0)
+            self.assertEqual(main(['demo','--exercise',str(self.path),'--start-measure','2','--end-measure','2','--notes','62']),0)
+        self.assertIn('measure positions 2–2',out.getvalue())
+        self.assertIn('Exercise complete',out.getvalue())

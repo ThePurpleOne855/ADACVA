@@ -51,7 +51,8 @@ def _read(path: Path) -> ET.Element:
         raise ValueError(f"Invalid MXL archive: {exc}") from exc
 
 
-def load_musicxml(path: Path, *, part=None, staff=None, voice=None) -> Exercise:
+def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
+                  start_measure=None, end_measure=None) -> Exercise:
     root = _read(path)
     if root.tag != "score-partwise":
         raise ValueError("Only score-partwise MusicXML is supported; export a partwise score.")
@@ -65,10 +66,30 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None) -> Exercise:
     if len(selected) != 1:
         raise ValueError(f"Unknown or ambiguous part {part!r}. Available: {choices}")
     selected = selected[0]
+    all_measures = selected.findall("measure")
+    count = len(all_measures)
+    start = 1 if start_measure is None else start_measure
+    end = count if end_measure is None else end_measure
+    if type(start) is not int or type(end) is not int or not 1 <= start <= end <= count:
+        raise ValueError(f"Invalid measure range: use inclusive positions 1–{count}, with start <= end.")
+    measures = all_measures[start - 1:end]
+    prefix = all_measures[:start - 1]
+    # Earlier pitch-changing state can persist into the excerpt. Conservatively
+    # reject it rather than silently importing the wrong sounding pitches.
+    for earlier in prefix:
+        for tag in ("transpose", "octave-shift", "measure-repeat"):
+            if earlier.find(f".//{tag}") is not None:
+                raise ValueError(f"Unsupported inherited MusicXML feature: {tag} before the selected range.")
+    active_ending = False
+    for earlier in prefix:
+        for ending in earlier.iter("ending"):
+            active_ending = ending.get("type") == "start"
+    if active_ending:
+        raise ValueError("Selected range starts inside an unsupported repeat ending.")
     for tag in ("repeat", "ending", "transpose", "octave-shift", "measure-repeat"):
-        if selected.find(f".//{tag}") is not None:
+        if any(m.find(f".//{tag}") is not None for m in measures):
             raise ValueError(f"Unsupported MusicXML feature: {tag}. Export an unfolded, concert-pitch practice line.")
-    for sound in selected.iter("sound"):
+    for sound in (s for m in measures for s in m.iter("sound")):
         if any(k in sound.attrib for k in ("dacapo", "dalsegno", "tocoda", "fine")):
             raise ValueError("Playback jumps are unsupported; export an unfolded practice line.")
 
@@ -76,7 +97,15 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None) -> Exercise:
     active_tie = None
     lines = set()
     divisions = Fraction(1)
-    for measure in selected.findall("measure"):
+    for earlier in prefix:
+        for value in earlier.findall("./attributes/divisions"):
+            try:
+                divisions = Fraction(value.text)
+                if divisions <= 0:
+                    raise ValueError()
+            except (ValueError, TypeError, ZeroDivisionError):
+                raise ValueError("Invalid inherited divisions before the selected range.") from None
+    for measure in measures:
         location = f"part {selected.get('id')}, measure {measure.get('number', '?')}"
         cursor = Fraction(0)
         previous_onset = Fraction(0)
@@ -125,10 +154,10 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None) -> Exercise:
             for tag in ("chord", "grace", "unpitched", "cue"):
                 if note.find(tag) is not None:
                     raise ValueError(f"Unsupported {tag} at {location}; choose a single-note melody.")
-            onset, end = intervals[id(note)]
+            onset, note_end = intervals[id(note)]
             if onset < last_end:
                 raise ValueError(f"Overlapping or reordered notes at {location}; select a monophonic line.")
-            last_end = end
+            last_end = note_end
             if note.find("rest") is not None:
                 if active_tie is not None:
                     raise ValueError(f"A rest interrupts a tie at {location}.")
@@ -151,15 +180,19 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None) -> Exercise:
                 raise ValueError(f"Unsupported tie at {location}.")
             if "stop" in ties:
                 if active_tie != midi:
-                    raise ValueError(f"Unmatched tie at {location}.")
+                    raise ValueError(f"Unmatched tie at {location}. If the range cuts a tie, extend its start to include the attack.")
             else:
                 if active_tie is not None:
                     raise ValueError(f"Unclosed tie at {location}.")
                 notes.append(midi)
             active_tie = midi if "start" in ties else None
     if active_tie is not None:
-        raise ValueError("Score ends with an unclosed tie.")
+        raise ValueError("Score or selected range ends with an unclosed tie; extend the end to include its release.")
     if not notes:
         raise ValueError("No playable notes in the selected part/staff/voice.")
     title = root.findtext("movement-title") or root.findtext("./work/work-title") or path.stem
-    return Exercise(title.strip() or path.stem, tuple(notes))
+    title = title.strip() or path.stem
+    if start_measure is not None or end_measure is not None:
+        first_label, last_label = measures[0].get("number", "?"), measures[-1].get("number", "?")
+        title += f" — measure positions {start}–{end} (score labels {first_label}–{last_label})"
+    return Exercise(title, tuple(notes))

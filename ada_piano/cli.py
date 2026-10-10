@@ -42,6 +42,10 @@ def main(argv=None) -> int:
         command.add_argument("--part", help="MusicXML part ID, e.g. P1")
         command.add_argument("--staff", help="MusicXML staff number, e.g. 1")
         command.add_argument("--voice", help="MusicXML voice ID, e.g. 1")
+        command.add_argument("--start-measure", type=int,
+                             help="First measure position, inclusive, counting from 1 (not printed label)")
+        command.add_argument("--end-measure", type=int,
+                             help="Last measure position, inclusive (defaults to end of part)")
     camera = commands.add_parser("camera", help="Check camera capture independently")
     camera.add_argument("--index", type=int, default=0)
     camera.add_argument("--seconds", type=float, default=5)
@@ -62,13 +66,15 @@ def main(argv=None) -> int:
                 for event in events:
                     print(f"{note_name(event.note)}: MIDI {event.note}, velocity {event.velocity}", flush=True)
         elif args.command == "sheet":
-            exercise = load_exercise(args.exercise, part=args.part, staff=args.staff, voice=args.voice)
+            exercise = load_exercise(args.exercise, part=args.part, staff=args.staff, voice=args.voice,
+                                     start_measure=args.start_measure, end_measure=args.end_measure)
             if args.exercise.suffix.lower() != ".json":
                 print("MusicXML pitch practice: rhythm and rests are not graded; tied notes count once.")
             print(exercise.title)
             print(", ".join(note_name(n) for n in exercise.notes))
         else:
-            exercise = load_exercise(args.exercise, part=args.part, staff=args.staff, voice=args.voice)
+            exercise = load_exercise(args.exercise, part=args.part, staff=args.staff, voice=args.voice,
+                                     start_measure=args.start_measure, end_measure=args.end_measure)
             tutor = Tutor(exercise)
             with closing(Feedback(args.speak)) as feedback:
                 if args.exercise.suffix.lower() != ".json":
