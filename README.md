@@ -44,13 +44,46 @@ For an offline core demo with Python already installed, `python -m ada_piano dem
 
 On Linux, speech requires a system speech engine such as eSpeak NG; MIDI needs an available ALSA sequencer. A headless container may have neither. On Windows/macOS, speech uses the installed system voice. Camera and MIDI also require OS device access and permissions. Missing devices or dependencies produce an error rather than silently pretending the test succeeded.
 
-## Understand the four modules
+## Note Reader GUI (2–5 minutes)
+
+Start the independent Note Reader test panel:
+
+```sh
+uv run --extra midi python -m ada_piano note-reader
+```
+
+1. Connect the YPT-300 **MIDI OUT** to the USB interface's **MIDI IN**, then plug the interface into your computer.
+2. The app connects automatically when there is one input other than **Midi Through**. Otherwise click **Refresh inputs**, select the USB interface, and click **Connect**. The mioXC is preferred in the selector; its name appears instead of “Yamaha.” **Midi Through** is a software routing port, not the keyboard.
+3. Play individual notes and chords. A labeled **61-key virtual piano** lights held keys green and marks the last played note with a blue outline. The panel also shows note names, MIDI numbers, velocity, channels (1–16), sustain status, and the last 500 note events. The displayed range starts at C2–C7 and shifts for transposed notes outside that range.
+4. Release the keys and confirm the held-key list clears. Both `note_off` and zero-velocity `note_on` messages count as releases. Sustain is separate: held keys represent physical presses, not sustained sound.
+5. Click **Disconnect / Stop** or close the window to release the MIDI port. After unplugging/reconnecting, click **Refresh inputs** and **Connect** again.
+
+For a hardware-free test, click **Demo**, or launch directly with:
+
+```sh
+uv run python -m ada_piano note-reader --demo
+```
+
+Demo simulates a C4–E4–G4 chord, both release formats, and sustain. It does not play audio or verify your cable. **Clear log** clears event history only; reconnecting or restarting Demo resets the session count. The window uses Tkinter; on Arch Linux, install `tk` if Tkinter is missing (`sudo pacman -S tk`). A graphical desktop is required. If Linux reports that the ALSA sequencer is unavailable, verify that `/dev/snd/seq` exists on the host and that the app has device access; containers may not expose MIDI devices.
+
+The reusable `ada_piano.note_reader.NoteReader` uses Mido's explicit RtMidi backend and nonblocking polling. It is independent of the existing tutor and sound sensor API. All 24 automated tests passed, including desktop GUI tests; a separate virtual-port test verified real RtMidi events reaching the virtual keyboard. Live input from the YPT-300 through the mioXC was confirmed by the user on 2026-10-10. Screen-reader usability still requires testing with a learner.
+
+### Connected but no keys light up
+
+The **MIDI activity** line distinguishes an open USB interface from received note data. After five seconds without any note presses, it displays a connection checklist. Its message count includes non-note messages delivered by Mido (for example pedal and clock messages); the RtMidi backend filters active sensing.
+
+1. Confirm the listening input is **mioXC**, not **Midi Through**. Connect keyboard **MIDI OUT** to interface **MIDI IN**. Keep USB connected: the mioXC requires USB power and does not act as a passive MIDI cable with USB unplugged.
+2. On the YPT-300, set **PC mode to OFF** and **Local Control ON** if you want to hear the piano's own speakers. **PC1 disables Keyboard Out**; PC mode OFF enables it. PC2 also enables Keyboard Out but disables local sound. Local sound alone does not prove MIDI transmission. See the [Yamaha manual, pages 59–60](https://data.yamaha.com/download/files/2091886).
+3. Play several keys and watch the message count. If it stays at zero, the app has not received MIDI data: check the cable, piano power, and PC mode. **Demo** tests the visual keyboard independently of that connection.
+
+## Understand the modules
 
 | Module | What works now | Later |
 | --- | --- | --- |
 | `ada_piano/camera` | Independent timed webcam capture check, optional preview | MediaPipe hand landmarks, keyboard calibration |
 | `ada_piano/music_sheet` | Validated JSON exercise → ordered MIDI notes | MusicXML import; scanned score recognition is stretch work |
 | `ada_piano/sound_sensor` | Simulated notes, real MIDI input, independent monitor | Optional microphone input and pitch estimation |
+| `ada_piano/note_reader` | Independent MIDI GUI, virtual keyboard, velocity/channel, sustain, simulated demo; live YPT-300 input confirmed | Accessibility validation |
 | `ada_piano/ai_tutor` | Compare the next note, correct higher/lower, optional speech | Hand-position context and AI-generated explanations |
 
 Music Sheet supplies the expected notes. Sound sensor supplies played notes. Tutor compares them, advances only on a correct note, and sends text or speech feedback. Camera is deliberately tested separately before it contributes hand-position observations.

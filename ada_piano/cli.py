@@ -35,6 +35,8 @@ def main(argv=None) -> int:
     commands.add_parser("midi-ports", help="List available MIDI inputs")
     monitor = commands.add_parser("midi-monitor", help="Read MIDI independently of the tutor")
     monitor.add_argument("--port", required=True)
+    reader = commands.add_parser("note-reader", help="Open the Note Reader MIDI test GUI")
+    reader.add_argument("--demo", action="store_true", help="Show simulated notes without MIDI hardware")
     sheet = commands.add_parser("sheet", help="Read an exercise as accessible text")
     sheet.add_argument("--exercise", type=Path, default=DEFAULT_EXERCISE)
     camera = commands.add_parser("camera", help="Check camera capture independently")
@@ -43,7 +45,13 @@ def main(argv=None) -> int:
     camera.add_argument("--preview", action="store_true", help="Open an optional visual preview")
     args = parser.parse_args(argv)
     try:
-        if args.command == "camera":
+        if args.command == "note-reader":
+            try:
+                from ada_piano.note_reader.gui import launch
+            except ImportError as exc:
+                raise RuntimeError("Note Reader requires Tkinter. On Arch Linux install tk: sudo pacman -S tk") from exc
+            launch(demo=args.demo)
+        elif args.command == "camera":
             from ada_piano.camera import check_camera
             print("Checking camera capture. Press Control C to stop.", flush=True)
             count = check_camera(args.index, args.seconds, args.preview)
