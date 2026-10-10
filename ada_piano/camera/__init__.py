@@ -1,4 +1,4 @@
-"""Independent webcam check; hand landmarks and key calibration come next."""
+"""Independent webcam check and hand tracking."""
 
 from time import monotonic
 

@@ -2,6 +2,12 @@
 
 Accessible Piano Learning Assistant: a Python hackathon prototype for blind and visually impaired learners.
 
+## Camera work in progress
+
+The runnable camera tracker and its overhead-mount plan are in [docs/CAMERA.md](docs/CAMERA.md).
+It detects and overlays two hands from a USB webcam, or from a still image.
+Key calibration, key-press attribution, and MIDI integration are next steps.
+
 ## Start here (2 minutes once dependencies are available)
 
 The simulated demo needs Python 3.11+ and no third-party packages, piano, camera, or API key:
