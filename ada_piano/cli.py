@@ -8,7 +8,7 @@ import sys
 from ada_piano.ai_tutor import Tutor
 from ada_piano.ai_tutor.speech import Feedback
 from ada_piano.music_sheet import load_exercise, note_name
-from ada_piano.sound_sensor import list_ports, midi_notes, simulated_notes
+from ada_piano.sound_sensor import list_ports, midi_notes, simulated_notes, simulated_chords
 
 DEFAULT_EXERCISE = Path(__file__).parent / "exercises" / "five_notes.json"
 
@@ -20,6 +20,16 @@ def midi_number(text: str) -> int:
     return value
 
 
+def midi_chord(text: str) -> tuple[int, ...]:
+    try:
+        notes = tuple(midi_number(n) for n in text.split("+"))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Use MIDI pitches separated by +, e.g. 60+64+67") from exc
+    if len(set(notes)) != len(notes):
+        raise argparse.ArgumentTypeError("A chord cannot contain duplicate pitches.")
+    return notes
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="ADA accessible piano learning prototype")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -28,8 +38,13 @@ def main(argv=None) -> int:
         p = commands.add_parser(name, help=help_text)
         p.add_argument("--exercise", type=Path, default=DEFAULT_EXERCISE)
         p.add_argument("--speak", action="store_true", help="Speak feedback using a local voice")
+        p.add_argument("--chord-window-ms", type=float, default=150,
+                       help="Maximum spread of chord note-on times in milliseconds (default 150)")
         if name == "demo":
-            p.add_argument("--notes", nargs="+", type=midi_number, default=[60, 61, 62, 64, 65, 67])
+            inputs = p.add_mutually_exclusive_group()
+            inputs.add_argument("--notes", nargs="+", type=midi_number)
+            inputs.add_argument("--chords", nargs="+", type=midi_chord,
+                                help="Simulated attack groups, e.g. 60+64+67 62+65+69")
         else:
             p.add_argument("--port", required=True, help="Exact name from midi-ports")
     commands.add_parser("midi-ports", help="List available MIDI inputs")
@@ -64,26 +79,34 @@ def main(argv=None) -> int:
             print("Listening for notes. Press Control C to stop.", flush=True)
             with closing(midi_notes(args.port)) as events:
                 for event in events:
-                    print(f"{note_name(event.note)}: MIDI {event.note}, velocity {event.velocity}", flush=True)
+                    print(f"{event.kind}: {note_name(event.note)}, MIDI {event.note}, velocity {event.velocity}", flush=True)
         elif args.command == "sheet":
             exercise = load_exercise(args.exercise, part=args.part, staff=args.staff, voice=args.voice,
                                      start_measure=args.start_measure, end_measure=args.end_measure)
             if args.exercise.suffix.lower() != ".json":
                 print("MusicXML pitch practice: rhythm and rests are not graded; tied notes count once.")
             print(exercise.title)
-            print(", ".join(note_name(n) for n in exercise.notes))
+            print(", ".join(" + ".join(note_name(n) for n in event.pitches) for event in exercise.events))
+            if args.exercise.suffix.lower() != ".json":
+                print(f"{len(exercise.events)} attack groups; {len(exercise.rests)} rests; {exercise.duration} quarter-note beats.")
         else:
             exercise = load_exercise(args.exercise, part=args.part, staff=args.staff, voice=args.voice,
                                      start_measure=args.start_measure, end_measure=args.end_measure)
-            tutor = Tutor(exercise)
+            tutor = Tutor(exercise, chord_window=args.chord_window_ms / 1000)
             with closing(Feedback(args.speak)) as feedback:
                 if args.exercise.suffix.lower() != ".json":
                     feedback.say("MusicXML pitch practice. Rhythm and rests are not graded; tied notes count once.")
                 feedback.say(f"{exercise.title}. {tutor.prompt()}")
-                source = simulated_notes(args.notes) if args.command == "demo" else midi_notes(args.port)
+                if args.command == "demo":
+                    source = simulated_chords(args.chords) if args.chords is not None else simulated_notes(
+                        args.notes if args.notes is not None else [60, 61, 62, 64, 65, 67], releases=True)
+                else:
+                    source = midi_notes(args.port)
                 with closing(source) as events:
                     for event in events:
-                        feedback.say(tutor.observe(event))
+                        response = tutor.observe(event)
+                        if response:
+                            feedback.say(response)
                         if tutor.complete:
                             break
                 if not tutor.complete:

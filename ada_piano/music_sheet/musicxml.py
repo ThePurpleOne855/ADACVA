@@ -1,11 +1,11 @@
-"""Import a selected monophonic MusicXML line for untimed pitch practice."""
+"""Import MusicXML attacks, chords, rests and exact quarter-note timing."""
 
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
-from . import Exercise
+from . import Exercise, ScoreEvent, ScoreNote, ScoreRest
 
 MAX_XML_BYTES = 16 * 1024 * 1024
 
@@ -93,9 +93,11 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
         if any(k in sound.attrib for k in ("dacapo", "dalsegno", "tocoda", "fine")):
             raise ValueError("Playback jumps are unsupported; export an unfolded practice line.")
 
-    notes = []
-    active_tie = None
-    lines = set()
+    # Mutable spans allow tied continuations to extend the original attack.
+    spans = []
+    active_ties = {}
+    rests = []
+    measure_start = Fraction(0)
     divisions = Fraction(1)
     for earlier in prefix:
         for value in earlier.findall("./attributes/divisions"):
@@ -107,20 +109,28 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
                 raise ValueError("Invalid inherited divisions before the selected range.") from None
     for measure in measures:
         location = f"part {selected.get('id')}, measure {measure.get('number', '?')}"
+        label = measure.get("number", "?")
         cursor = Fraction(0)
-        previous_onset = Fraction(0)
-        intervals = {}
+        extent = Fraction(0)
+        chord_base = None
+        line_ends = {}
         for item in measure:
             if item.tag == "attributes" and item.find("divisions") is not None:
                 try:
                     divisions = Fraction(item.findtext("divisions"))
                     if divisions <= 0:
                         raise ValueError()
-                except (ValueError, ZeroDivisionError):
+                except (ValueError, TypeError, ZeroDivisionError):
                     raise ValueError(f"Invalid divisions at {location}.") from None
             if item.tag not in {"note", "backup", "forward"}:
                 continue
+            note_staff = item.findtext("staff", "1")
+            note_voice = item.findtext("voice", "1")
+            included = (staff is None or note_staff == staff) and (voice is None or note_voice == voice)
             if item.find("grace") is not None:
+                chord_base = None
+                if included:
+                    raise ValueError(f"Unsupported grace at {location}.")
                 continue
             try:
                 duration = Fraction(item.findtext("duration")) / divisions
@@ -130,39 +140,42 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
                 raise ValueError(f"Invalid or missing duration at {location}.") from None
             if item.tag == "backup":
                 cursor -= duration
+                chord_base = None
                 if cursor < 0:
                     raise ValueError(f"Backup precedes the measure start at {location}.")
+                continue
             elif item.tag == "forward":
                 cursor += duration
+                extent = max(extent, cursor)
+                chord_base = None
+                continue
+            chord = item.find("chord") is not None
+            is_rest = item.find("rest") is not None
+            if chord:
+                if chord_base is None or is_rest or chord_base[2] != note_voice or duration > chord_base[1]:
+                    raise ValueError(f"Invalid chord at {location}: needs a preceding pitched note in the same voice with sufficient duration.")
+                onset = chord_base[0]
             else:
-                onset = previous_onset if item.find("chord") is not None else cursor
-                intervals[id(item)] = (onset, onset + duration)
-                if item.find("chord") is None:
-                    previous_onset = onset
-                    cursor += duration
-        # backup can reorder a voice as well as switch voices; do not guess.
-        if measure.find("backup") is not None and staff is None and voice is None:
-            raise ValueError(f"Multiple voices/staves at {location}; select --staff and/or --voice.")
-        last_end = Fraction(0)
-        for note in measure.findall("note"):
-            note_staff, note_voice = note.findtext("staff", "1"), note.findtext("voice", "1")
-            if staff is not None and note_staff != staff or voice is not None and note_voice != voice:
+                onset = cursor
+                cursor += duration
+                chord_base = None if is_rest else (onset, duration, note_voice)
+            extent = max(extent, onset + duration)
+            if not included:
                 continue
-            lines.add((note_staff, note_voice))
-            if len(lines) > 1:
-                raise ValueError(f"Multiple musical lines at {location}; select --staff and --voice.")
-            for tag in ("chord", "grace", "unpitched", "cue"):
-                if note.find(tag) is not None:
-                    raise ValueError(f"Unsupported {tag} at {location}; choose a single-note melody.")
-            onset, note_end = intervals[id(note)]
-            if onset < last_end:
+            for tag in ("unpitched", "cue"):
+                if item.find(tag) is not None:
+                    raise ValueError(f"Unsupported {tag} at {location}.")
+            line = (note_staff, note_voice)
+            if not chord and onset < line_ends.get(line, 0):
                 raise ValueError(f"Overlapping or reordered notes at {location}; select a monophonic line.")
-            last_end = note_end
-            if note.find("rest") is not None:
-                if active_tie is not None:
+            line_ends[line] = max(line_ends.get(line, 0), onset + duration)
+            absolute = measure_start + onset
+            if is_rest:
+                if any(k[0] == note_voice for k in active_ties):
                     raise ValueError(f"A rest interrupts a tie at {location}.")
+                rests.append(ScoreRest(absolute, duration, note_staff, note_voice, label))
                 continue
-            pitch = note.find("pitch")
+            pitch = item.find("pitch")
             if pitch is None:
                 raise ValueError(f"Missing pitch at {location}.")
             try:
@@ -175,24 +188,41 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
                     raise ValueError("Pitch is outside MIDI range 0–127")
             except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
                 raise ValueError(f"Invalid or unsupported pitch at {location}: {exc}") from exc
-            ties = {t.get("type") for t in note.findall("tie")}
+            ties = {t.get("type") for t in item.findall("tie")}
             if ties - {"start", "stop"}:
                 raise ValueError(f"Unsupported tie at {location}.")
+            key = (note_voice, midi)
             if "stop" in ties:
-                if active_tie != midi:
+                span = active_ties.get(key)
+                if span is None or span['onset'] + span['duration'] != absolute:
                     raise ValueError(f"Unmatched tie at {location}. If the range cuts a tie, extend its start to include the attack.")
+                span['duration'] += duration
             else:
-                if active_tie is not None:
+                if key in active_ties:
                     raise ValueError(f"Unclosed tie at {location}.")
-                notes.append(midi)
-            active_tie = midi if "start" in ties else None
-    if active_tie is not None:
+                span = dict(onset=absolute, duration=duration, pitch=midi,
+                            staff=note_staff, voice=note_voice, measure=label)
+                spans.append(span)
+            if "start" in ties:
+                active_ties[key] = span
+            else:
+                active_ties.pop(key, None)
+        measure_start += extent
+    if active_ties:
         raise ValueError("Score or selected range ends with an unclosed tie; extend the end to include its release.")
-    if not notes:
+    if not spans:
         raise ValueError("No playable notes in the selected part/staff/voice.")
     title = root.findtext("movement-title") or root.findtext("./work/work-title") or path.stem
     title = title.strip() or path.stem
     if start_measure is not None or end_measure is not None:
         first_label, last_label = measures[0].get("number", "?"), measures[-1].get("number", "?")
         title += f" — measure positions {start}–{end} (score labels {first_label}–{last_label})"
-    return Exercise(title, tuple(notes))
+    grouped = {}
+    for span in spans:
+        grouped.setdefault(span['onset'], []).append(span)
+    events = tuple(ScoreEvent(onset, tuple(
+        ScoreNote(s['pitch'], s['duration'], s['staff'], s['voice'])
+        for s in sorted(group, key=lambda s: (s['pitch'], s['staff'], s['voice']))), group[0]['measure'])
+        for onset, group in sorted(grouped.items()))
+    notes = tuple(n for event in events for n in event.pitches)
+    return Exercise(title, notes, events, tuple(rests), measure_start)
