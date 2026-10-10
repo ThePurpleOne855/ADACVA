@@ -18,13 +18,13 @@ def parse_args() -> argparse.Namespace:
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--image", type=Path, help="Process one still image")
     source.add_argument("--source", type=int, default=0, help="USB camera index (default: 0)")
-    parser.add_argument("--model", type=Path, default=Path("models/hand_landmarker.task"))
+    parser.add_argument("--model", type=Path, default=Path("hand_landmarker.task"))
     parser.add_argument("--output", type=Path, help="Save an annotated image (requires --image)")
     parser.add_argument("--jsonl", type=Path, help="Write timestamped landmarks as JSON lines")
     parser.add_argument("--seconds", type=float, help="Stop live capture after this many seconds")
     parser.add_argument("--no-preview", action="store_true", help="Run without a display window")
-    parser.add_argument("--width", type=int, default=1280)
-    parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--width", type=int, default=1920)
+    parser.add_argument("--height", type=int, default=1080)
     args = parser.parse_args()
     if args.output and not args.image:
         parser.error("--output requires --image")
@@ -123,6 +123,7 @@ def main() -> int:
             if not camera.isOpened():
                 print(f"Cannot open camera index {args.source}. Check USB connection and try --source 1.", file=sys.stderr)
                 return 2
+            camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             camera.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
             camera.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
             started = time.monotonic()
@@ -134,6 +135,8 @@ def main() -> int:
                     if not ok:
                         print("Camera stopped delivering frames.", file=sys.stderr)
                         return 2
+                    if frames == 0:
+                        print(f"Camera {args.source}: {frame.shape[1]}x{frame.shape[0]} captured", flush=True)
                     captured_monotonic_ns = time.monotonic_ns()
                     timestamp_ms = max(last_timestamp_ms + 1, int((time.monotonic() - started) * 1000))
                     last_timestamp_ms = timestamp_ms

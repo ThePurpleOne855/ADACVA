@@ -12,8 +12,6 @@ From the repository root, with Python 3.11 or 3.12:
 python -m venv .venv
 . .\.venv\Scripts\Activate.ps1
 python -m pip install -e '.[camera]'
-New-Item -ItemType Directory -Path models -Force | Out-Null
-Invoke-WebRequest -Uri 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task' -OutFile 'models\hand_landmarker.task'
 python -m ada_piano.camera --source 0 --jsonl hand-session.jsonl
 ```
 
@@ -26,9 +24,26 @@ can later be matched to MIDI events recorded on the same computer with
 `time.monotonic_ns()`. The `timestamp_ms` field is the MediaPipe video timestamp
 relative to the beginning of capture.
 
-The model is downloaded separately, kept in ignored `models/`, and is not
-uploaded with camera frames. It can be used offline after download. Avoid
-recording bystanders; JSON output is optional.
+The repository currently includes `hand_landmarker.task`; use `--model` to
+select another local model. Camera frames are processed locally. Avoid recording
+bystanders; JSON output is optional. The CyberTrack H4 supports 1080p at 30 fps
+and MJPG capture, which the tracker requests by default. If the computer cannot
+keep up, try `--width 1280 --height 720` and measure the actual frame rate.
+
+## Known hardware
+
+The webcam is an Adesso CyberTrack H4. Adesso lists 1920x1080 at 30 fps, a
+78-degree lens angle, manual focus, a 76 x 85 x 32 mm body, and about 100 g
+weight. Yamaha lists the YPT-300 as 61 keys and 945 x 348 x 110 mm overall.
+The lens angle is not clearly identified as horizontal or diagonal, and the
+webcam clip dimensions are not in the published body measurements. A reasonable
+first height experiment is 65-75 cm over the keys for a full-width view; verify
+the actual frame on the mounted camera before cutting the arm. Focus the lens
+at that distance. A shorter mount capturing two or three octaves may give more
+reliable finger-to-key mapping for the initial demo.
+
+Sources: [CyberTrack H4 datasheet](https://download.adesso.com/ds/CYBERTRACK-H4-DATASHEET.pdf),
+[Yamaha YPT-300 specifications](https://ca.yamaha.com/fr/musical-instruments/keyboards/explore/pk-45th/chronology/2000/).
 
 ## Mount to build
 

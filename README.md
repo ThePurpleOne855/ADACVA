@@ -30,7 +30,7 @@ Optional groups let you install one input at a time: `.[camera]`, `.[midi]`, or 
 
 | Dependency | Purpose |
 | --- | --- |
-| OpenCV | Capture webcam frames |
+| OpenCV + MediaPipe | Capture webcam frames and track hand landmarks |
 | Mido + python-rtmidi | Receive key events through a USB-to-MIDI interface |
 | pyttsx3 | Speak feedback locally using a system voice |
 | Python standard library | Exercises, tutor logic, CLI, tests |
@@ -41,14 +41,14 @@ On Linux, speech requires a system speech engine such as eSpeak NG; MIDI needs a
 
 | Module | What works now | Later |
 | --- | --- | --- |
-| `ada_piano/camera` | Independent timed webcam capture check, optional preview | MediaPipe hand landmarks, keyboard calibration |
+| `ada_piano/camera` | Independent capture check; separate two-hand landmark tracker | Keyboard calibration and MIDI-aligned fingering |
 | `ada_piano/music_sheet` | Validated JSON exercise → ordered MIDI notes | MusicXML import; scanned score recognition is stretch work |
 | `ada_piano/sound_sensor` | Simulated notes, real MIDI input, independent monitor | Optional microphone input and pitch estimation |
 | `ada_piano/ai_tutor` | Compare the next note, correct higher/lower, optional speech | Hand-position context and AI-generated explanations |
 
 Music Sheet supplies the expected notes. Sound sensor supplies played notes. Tutor compares them, advances only on a correct note, and sends text or speech feedback. Camera is deliberately tested separately before it contributes hand-position observations.
 
-The current tutor is rule based, not an AI model. It evaluates single notes in sequence, not timing, chords, fingering, or posture. MIDI captures note events, not audio. The camera check does not yet detect hands. Speech currently blocks while each prompt is spoken: use slow, one-note-at-a-time practice. Continuous real-time feedback needs a bounded speech queue and handling for notes received during speech.
+The current tutor is rule based, not an AI model. It evaluates single notes in sequence, not timing, chords, fingering, or posture. MIDI captures note events, not audio. The separate camera tracker detects hands but does not yet associate them with keys or notes. Speech currently blocks while each prompt is spoken: use slow, one-note-at-a-time practice. Continuous real-time feedback needs a bounded speech queue and handling for notes received during speech.
 
 ## Test each part separately
 
