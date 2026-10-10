@@ -9,7 +9,7 @@ def check_camera(index: int = 0, seconds: float = 5, preview: bool = False) -> i
     try:
         import cv2
     except ImportError as exc:
-        raise RuntimeError('Camera dependencies missing. Run: python -m pip install -e ".[camera]"') from exc
+        raise RuntimeError('Camera dependencies missing. Run: uv sync --extra camera') from exc
     camera = cv2.VideoCapture(index)
     count = 0
     try:

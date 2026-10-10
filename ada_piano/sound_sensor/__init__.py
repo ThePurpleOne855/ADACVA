@@ -23,7 +23,7 @@ def _mido():
         import mido
         import rtmidi  # noqa: F401 - check native backend before opening a port
     except ImportError as exc:
-        raise RuntimeError('MIDI dependencies missing. Run: python -m pip install -e ".[midi]"') from exc
+        raise RuntimeError('MIDI dependencies missing. Run: uv sync --extra midi') from exc
     mido.set_backend("mido.backends.rtmidi")
     return mido
 
