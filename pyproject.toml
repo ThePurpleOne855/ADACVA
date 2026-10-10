@@ -22,4 +22,4 @@ ada-piano = "ada_piano.cli:main"
 include = ["ada_piano*"]
 
 [tool.setuptools.package-data]
-ada_piano = ["exercises/*.json"]
+ada_piano = ["exercises/*.json", "exercises/*.musicxml"]

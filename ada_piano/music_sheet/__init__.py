@@ -16,7 +16,16 @@ class Exercise:
     notes: tuple[int, ...]
 
 
-def load_exercise(path: Path) -> Exercise:
+def load_exercise(path: Path, *, part: str | None = None,
+                  staff: str | None = None, voice: str | None = None) -> Exercise:
+    path = Path(path)
+    if path.suffix.lower() in {".xml", ".musicxml", ".mxl"}:
+        from .musicxml import load_musicxml
+        return load_musicxml(path, part=part, staff=staff, voice=voice)
+    if path.suffix.lower() != ".json":
+        raise ValueError("Use JSON, MusicXML (.musicxml/.xml), or compressed MusicXML (.mxl). PDF/image recognition is not supported.")
+    if any(value is not None for value in (part, staff, voice)):
+        raise ValueError("Part, staff and voice selection apply only to MusicXML.")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Exercise must be a JSON object.")

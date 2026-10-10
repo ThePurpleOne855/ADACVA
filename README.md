@@ -1,5 +1,8 @@
 # ADA Piano Teacher
 
+MusicXML import is available for single-note pitch practice. See
+[importing existing sheet music](docs/MUSICXML.md) for supported files and limits.
+
 Accessible Piano Learning Assistant: a Python hackathon prototype for blind and visually impaired learners.
 
 ## Start here (2 minutes once dependencies are available)
