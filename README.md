@@ -5,6 +5,15 @@ MusicXML import is available for single-note pitch practice. See
 
 Accessible Piano Learning Assistant: a Python hackathon prototype for blind and visually impaired learners.
 
+## Automated checks
+
+GitHub Actions runs the tests on pull requests and pushes to `main`, using
+Python 3.11 and 3.12 on Windows and Linux. It also checks installation, the CLI,
+and the packaged exercise files. Only the core package is installed; physical
+camera, MIDI and speech-device checks still need local testing. Before merging,
+check that all four jobs in the PR's Checks tab are green. Requiring these
+checks before merge is a separate repository branch-protection setting.
+
 ## Start here (2 minutes once dependencies are available)
 
 After installing [uv](https://docs.astral.sh/uv/getting-started/installation/), run the simulated demo. It needs no piano, camera, or API key:

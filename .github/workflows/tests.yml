@@ -1,0 +1,43 @@
+name: Python tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install core package
+        run: python -m pip install .
+      - name: Run unit and integration tests
+        run: python -m unittest discover -s tests -v
+      - name: Check installed CLI and packaged exercises
+        working-directory: ${{ runner.temp }}
+        run: |
+          ada-piano demo
+          python -c "from importlib.resources import files; from ada_piano.music_sheet import load_exercise; from pathlib import Path; p = Path(str(files('ada_piano').joinpath('exercises/five_notes.musicxml'))); assert load_exercise(p).notes == (60, 62, 64, 65, 67)"
