@@ -23,6 +23,16 @@ ADA picks the best voice automatically:
 
 Change it any time with the **Voice** list in the ADA tab.
 
+## Talking to ADA
+
+Speech recognition runs offline (faster-whisper, part of the `voice` extra; the
+first use downloads about 140 MB), or through OpenAI when an API key is set.
+In the main app you don't press anything: ADA listens after it speaks, sends
+what it heard, and listens again after answering. The app tests the
+microphones once and uses one that carries sound, skipping loopback inputs left
+by DroidCam and silent webcam mics. To force one, set `ADA_MIC_TARGET` to a
+source name from `pactl list short sources`.
+
 ## Keys
 
 | Key | Action |

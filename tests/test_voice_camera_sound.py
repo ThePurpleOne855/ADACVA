@@ -175,3 +175,36 @@ class WindowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MicrophoneChoiceTests(unittest.TestCase):
+    def setUp(self):
+        from ada_piano.agent import linux_speech_input as mic
+        self.mic = mic
+        mic._chosen_target.clear()
+        self.addCleanup(mic._chosen_target.clear)
+
+    def sources(self, default):
+        listing = ("1\talsa_input.platform-snd_aloop.0.analog-stereo\tPipeWire\n"
+                   "2\talsa_input.usb-Camera.analog-stereo\tPipeWire\n"
+                   "3\talsa_input.pci.HiFi__Mic1__source\tPipeWire\n")
+        return lambda args: default + "\n" if args[1] == "get-default-source" else listing
+
+    def test_skips_loopback_and_silent_webcam_mic(self):
+        levels = {"alsa_input.usb-Camera.analog-stereo": 0, "alsa_input.pci.HiFi__Mic1__source": 150}
+        choice = self.mic.microphone_target("pw-record", self.sources("alsa_input.platform-snd_aloop.0.analog-stereo"),
+                                            level=lambda engine, name: levels[name])
+        self.assertEqual(choice, "alsa_input.pci.HiFi__Mic1__source")
+
+    def test_working_default_is_kept(self):
+        choice = self.mic.microphone_target("pw-record", self.sources("alsa_input.usb-Camera.analog-stereo"),
+                                            level=lambda engine, name: 300)
+        self.assertIsNone(choice)
+
+    def test_dc_offset_is_not_speech(self):
+        from array import array
+        utterance = self.mic.Utterance()
+        constant = array("h", [11750] * 1600).tobytes()
+        for _ in range(20):
+            utterance.feed(constant)
+        self.assertFalse(utterance.frames)

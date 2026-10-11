@@ -14,7 +14,7 @@ camera = ["opencv-python>=4.10,<5", "mediapipe>=0.10,<0.11"]
 midi = ["mido>=1.3,<2", "python-rtmidi>=1.5,<2"]
 speech = [] # Native system speech; install espeak-ng on Linux.
 agent = ["openai>=3.28,<4"]
-voice = ["piper-tts>=1.3,<2"] # Natural offline voice; then run: ada-piano voice-setup
+voice = ["piper-tts>=1.3,<2", "faster-whisper>=1.1,<2"] # Natural offline voice; then run: ada-piano voice-setup
 hardware = ["ada-piano-teacher[camera,midi,speech,voice]"]
 
 [project.scripts]

@@ -55,6 +55,8 @@ class CoachPanel(ttk.Frame):
         self._request_playback_status = None
         self._request = None
         self.camera = None  # optional callable(on=True) -> spoken status, set by the main window
+        self.conversation = False  # accessible mode: auto-send speech and listen again after replies
+        self._listen_next = False
         self.local_commands = hasattr(self.score, "load_piece")
         if self.local_commands and getattr(self.score, "announce", None) is None:
             self.score.announce = self.announce
@@ -183,6 +185,8 @@ class CoachPanel(ttk.Frame):
         self.status.set(text)
         if self.speak.get() and not self._closed:
             self._say(text)
+        if getattr(self, "conversation", False):
+            self._listen_next = True
 
     def _api_configured(self):
         return bool(self.client or self._api_key or os.environ.get("OPENAI_API_KEY"))
@@ -303,6 +307,8 @@ class CoachPanel(ttk.Frame):
 
     def _microphone_busy(self):
         return (self._closed
+                or getattr(self.score, "take", None) is not None
+                or self.score.tutor is not None
                 or self.score.playback.player.status.state == "playing"
                 or self._pending_reference is not None
                 or not self._speech_done.is_set())
@@ -331,6 +337,10 @@ class CoachPanel(ttk.Frame):
             else:
                 self.text.set(text)
                 self.entry.focus_set()
+                if self.conversation:
+                    # Voice-first mode: send what was heard; no button press needed.
+                    self.ask()
+                    self._listen_next = True
         if self.hands_free.get() and self.microphone.available and not self._microphone_busy():
             self.microphone.start(continuous=True)
         elif self._listen_pending and not self.microphone.running:
@@ -583,6 +593,10 @@ class CoachPanel(ttk.Frame):
         if self._thread is None or not self._thread.is_alive():
             self.ask_button.configure(state="normal")
         self._poll_microphone()
+        if (getattr(self, "_listen_next", False) and (self._thread is None or not self._thread.is_alive())
+                and self._pending_reference is None and not self._reference_active):
+            self._listen_next = False
+            self.listen_after_speech()
         if hasattr(self, "voice_status") and hasattr(self.voice, "status"):
             self.voice_status.set(self.voice.status + (" AI-generated · Reply text sent to OpenAI · API charges apply." if isinstance(self.voice, CloudVoiceService) else ""))
         if not self._closed:
