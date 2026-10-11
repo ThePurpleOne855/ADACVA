@@ -1,4 +1,4 @@
-"""Tkinter test panel for live MIDI input; no camera or tutor required."""
+"""Combined piano reader, reference playback, and optional camera preview."""
 
 from time import monotonic
 from types import SimpleNamespace
@@ -9,10 +9,11 @@ from ada_piano.music_sheet import note_name
 from ada_piano.note_reader import NoteEvent, NoteReader
 from ada_piano.note_reader.keyboard import PianoKeyboard
 from ada_piano.playback.gui import PlaybackPanel
+from ada_piano.camera.gui import CameraPanel
 
 
 class NoteReaderWindow:
-    def __init__(self, root: tk.Tk, reader=None, demo=False, player=None):
+    def __init__(self, root: tk.Tk, reader=None, demo=False, player=None, camera_worker=None):
         self.root = root
         self.reader = reader if reader is not None else NoteReader()
         self.demo = False
@@ -22,9 +23,9 @@ class NoteReaderWindow:
         self._timer = None
         self._closed = False
         self._last_played = None
-        self.root.title("Note Reader — ADA Piano Teacher")
-        self.root.geometry("1100x820")
-        self.root.minsize(900, 760)
+        self.root.title("Piano & Camera — ADA Piano Teacher")
+        self.root.geometry("1400x850")
+        self.root.minsize(1100, 760)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.port = tk.StringVar()
         self.status = tk.StringVar(value="Disconnected. Select a MIDI input or try Demo.")
@@ -33,8 +34,12 @@ class NoteReaderWindow:
         self.held = tk.StringVar(value="Held keys: none")
         self.pedal = tk.StringVar(value="Sustain: off   |   Notes received: 0")
         self.activity = tk.StringVar(value="MIDI activity: disconnected")
-        frame = ttk.Frame(root, padding=20)
-        frame.pack(fill="both", expand=True)
+        panes = ttk.Panedwindow(root, orient="horizontal")
+        panes.pack(fill="both", expand=True)
+        frame = ttk.Frame(panes, padding=16)
+        panes.add(frame, weight=3)
+        self.camera = CameraPanel(panes, worker=camera_worker)
+        panes.add(self.camera, weight=2)
         ttk.Label(frame, text="Note Reader", font=("", 24, "bold")).pack(anchor="w")
         ttk.Label(frame, text="Yamaha YPT-300 · MIDI input test · Middle C = C4 (60)").pack(anchor="w", pady=(0, 12))
         ttk.Label(frame, text="MIDI input (the USB cable's name may appear instead of Yamaha):").pack(anchor="w")
@@ -243,12 +248,15 @@ class NoteReaderWindow:
         if self._timer is not None:
             self.root.after_cancel(self._timer)
         try:
-            self.playback.player.close()
+            self.camera.close()
         finally:
             try:
-                self.reader.disconnect()
+                self.playback.player.close()
             finally:
-                self.root.destroy()
+                try:
+                    self.reader.disconnect()
+                finally:
+                    self.root.destroy()
 
 
 def launch(demo=False):

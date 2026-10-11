@@ -50,7 +50,7 @@ def main(argv=None) -> int:
     commands.add_parser("midi-ports", help="List available MIDI inputs")
     monitor = commands.add_parser("midi-monitor", help="Read MIDI independently of the tutor")
     monitor.add_argument("--port", required=True)
-    reader = commands.add_parser("note-reader", help="Open the Note Reader MIDI test GUI")
+    reader = commands.add_parser("note-reader", help="Open the combined piano reader and camera GUI")
     reader.add_argument("--demo", action="store_true", help="Show simulated notes without MIDI hardware")
     sheet = commands.add_parser("sheet", help="Read an exercise as accessible text")
     sheet.add_argument("--exercise", type=Path, default=DEFAULT_EXERCISE)

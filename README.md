@@ -16,6 +16,43 @@ checks before merge is a separate repository branch-protection setting.
 
 ## Start here (2 minutes once dependencies are available)
 
+### Combined camera and piano window
+
+From the repository root, run:
+
+```sh
+uv run --extra camera --extra midi python -m ada_piano note-reader
+```
+
+The MIDI reader, virtual keyboard, and audible-reference controls appear on the left;
+the hand-tracking camera preview appears on the right. Drag the divider to resize
+the panels. Select the MIDI input and click **Start camera**. Camera index `0`
+is the default; stop before trying `1` for another webcam.
+
+The camera marks base knuckles in blue, middle joints in orange, and fingertips
+in green, with text labels and connected finger segments. The thumb's middle
+joint is labeled IP. The camera starts only when requested and needs the root
+`hand_landmarker.task` model file. **Stop camera** leaves MIDI input and playback
+running. Closing the window stops camera capture and MIDI playback. Camera
+capture and inference run in a background thread, retaining only the latest
+preview so a slow camera does not block the MIDI controls. A camera failure is
+shown in its panel without disconnecting the piano.
+
+For a local integration check (about 2 minutes):
+
+1. Start the camera and move your fingers; check the knuckle and fingertip markers.
+2. Play a piano key; check that the virtual keyboard updates alongside the video.
+3. Use **Audible reference** to play a short sequence; check that the preview continues.
+4. Stop and restart the camera; MIDI should remain connected.
+5. Close the window; confirm the camera is released and playback stops.
+
+Without a MIDI interface, add `--demo` to simulate input while testing the real
+camera. This integration shares a window; it does not yet map fingers to piano
+keys or grade fingering. Native camera drivers may delay shutdown while a
+capture call finishes; the GUI does not wait indefinitely on a stalled driver.
+
+### Command-line demo
+
 After installing [uv](https://docs.astral.sh/uv/getting-started/installation/), run the simulated demo. It needs no piano, camera, or API key:
 
 ```sh

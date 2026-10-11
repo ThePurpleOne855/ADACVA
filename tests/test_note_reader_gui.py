@@ -7,6 +7,32 @@ from ada_piano.note_reader import NoteReader
 from test_note_reader import FakeBackend, note, control
 from ada_piano.playback import ReferencePlayer
 from test_playback import FakeOutputBackend, message
+from ada_piano.camera.stream import CameraFrame
+
+
+class FakeCameraWorker:
+    def __init__(self):
+        self.running = False
+        self.closed = False
+        self.status = "Camera off."
+        self.frame = None
+
+    def start(self, index):
+        self.running = True
+        self.status = "Tracking 1 hand(s)."
+        self.frame = CameraFrame(b"P6\n2 2\n255\n" + bytes([0, 255, 0]) * 4, 1)
+
+    def snapshot(self):
+        frame, self.frame = self.frame, None
+        return frame, self.status
+
+    def stop(self):
+        self.running = False
+        self.status = "Camera stopped."
+
+    def close(self):
+        self.stop()
+        self.closed = True
 
 try:
     import tkinter as tk
@@ -27,7 +53,9 @@ class NoteReaderGuiTests(unittest.TestCase):
         self.reader = NoteReader(self.backend)
         self.output_backend = FakeOutputBackend()
         self.player = ReferencePlayer(self.output_backend, message_factory=message)
-        self.window = NoteReaderWindow(self.root, reader=self.reader, player=self.player)
+        self.camera_worker = FakeCameraWorker()
+        self.window = NoteReaderWindow(self.root, reader=self.reader, player=self.player,
+                                       camera_worker=self.camera_worker)
         # Withdrawn test windows do not receive the canvas Configure event.
         self.window.keyboard._draw()
         self.addCleanup(self.window.close)
@@ -35,6 +63,27 @@ class NoteReaderGuiTests(unittest.TestCase):
     def run_gui(self, milliseconds=100):
         self.root.after(milliseconds, self.root.quit)
         self.root.mainloop()
+
+    def test_embedded_camera_and_midi_update_together(self):
+        self.window.camera.start()
+        self.backend.ports[-1].messages.append(note(number=64))
+        self.run_gui()
+        self.assertIn("E4", self.window.latest.get())
+        self.assertEqual(self.window.camera._photo.width(), 2)
+        self.assertIn("Tracking 1", self.window.camera.status.get())
+        self.window.camera.stop()
+        self.assertIsNone(self.window.camera._photo)
+        self.assertTrue(self.reader.connected)
+        self.window.close()
+        self.assertTrue(self.camera_worker.closed)
+
+    def test_camera_failure_keeps_midi_connected(self):
+        self.camera_worker.status = "Camera error: Device unavailable"
+        self.backend.ports[-1].messages.append(note())
+        self.run_gui()
+        self.assertIn("Device unavailable", self.window.camera.status.get())
+        self.assertIn("C4", self.window.latest.get())
+        self.assertTrue(self.reader.connected)
 
     def test_live_notes_and_stop(self):
         self.window.connect()
