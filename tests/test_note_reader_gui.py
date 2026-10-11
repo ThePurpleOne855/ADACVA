@@ -1,5 +1,6 @@
 """Desktop smoke tests; skipped when Tk or a display is unavailable."""
 
+import gc
 import unittest
 from unittest.mock import patch
 
@@ -17,7 +18,8 @@ class FakeCameraWorker:
         self.status = "Camera off."
         self.frame = None
 
-    def start(self, index):
+    def start(self, source):
+        self.source = source
         self.running = True
         self.status = "Tracking 1 hand(s)."
         self.frame = CameraFrame(b"P6\n2 2\n255\n" + bytes([0, 255, 0]) * 4, 1)
@@ -58,7 +60,13 @@ class NoteReaderGuiTests(unittest.TestCase):
                                        camera_worker=self.camera_worker)
         # Withdrawn test windows do not receive the canvas Configure event.
         self.window.keyboard._draw()
-        self.addCleanup(self.window.close)
+        self.addCleanup(self.close_window)
+
+    def close_window(self):
+        self.window.close()
+        self.window = None
+        # Reclaim widget cycles on Tk's owning thread, not a later worker.
+        gc.collect()
 
     def run_gui(self, milliseconds=100):
         self.root.after(milliseconds, self.root.quit)
@@ -76,6 +84,16 @@ class NoteReaderGuiTests(unittest.TestCase):
         self.assertTrue(self.reader.connected)
         self.window.close()
         self.assertTrue(self.camera_worker.closed)
+
+    def test_camera_source_field_accepts_v4l2_device(self):
+        self.window.camera.source.set("/dev/video2")
+        self.window.camera.start()
+        self.assertEqual(self.camera_worker.source, "/dev/video2")
+        self.assertNotEqual(str(self.window.camera.source_field.cget("state")), "readonly")
+        self.backend.ports[-1].messages.append(note())
+        self.run_gui()
+        self.assertIn("C4", self.window.latest.get())
+        self.assertTrue(self.reader.connected)
 
     def test_camera_failure_keeps_midi_connected(self):
         self.camera_worker.status = "Camera error: Device unavailable"

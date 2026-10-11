@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ada_piano.camera.stream import CameraWorker
+from ada_piano.camera.source import parse_camera_source
 
 
 class CameraPanel(ttk.LabelFrame):
@@ -13,12 +14,14 @@ class CameraPanel(ttk.LabelFrame):
         self._photo = None
         self._closed = False
         self._notice = None
-        self.index = tk.StringVar(value="0")
+        self.source = tk.StringVar(value="0")
         self.status = tk.StringVar(value="Camera off. MIDI works independently.")
         controls = ttk.Frame(self)
         controls.pack(fill="x")
-        ttk.Label(controls, text="Camera index:").pack(side="left")
-        ttk.Spinbox(controls, from_=0, to=10, width=3, textvariable=self.index).pack(side="left", padx=6)
+        ttk.Label(controls, text="Camera source:").pack(side="left")
+        self.source_field = ttk.Combobox(controls, width=16, textvariable=self.source,
+                                        values=("0", "1", "2", "/dev/video2"))
+        self.source_field.pack(side="left", padx=6)
         self.start_button = ttk.Button(controls, text="Start camera", command=self.start)
         self.start_button.pack(side="left", padx=4)
         ttk.Button(controls, text="Stop camera", command=self.stop).pack(side="left")
@@ -27,16 +30,13 @@ class CameraPanel(ttk.LabelFrame):
         ttk.Label(self, textvariable=self.status, wraplength=410).pack(anchor="w")
         ttk.Label(self, text="Blue: base knuckles · Orange: middle joints\n"
                   "Green: fingertips · White: finger segments\n"
-                  "Preview is mirrored. Tracking does not grade fingering.",
+                  "Preview is unmirrored. Tracking does not grade fingering.",
                   wraplength=410).pack(anchor="w", pady=(8, 0))
         self._timer = self.after(50, self._tick)
 
     def start(self):
         try:
-            index = int(self.index.get())
-            if index < 0:
-                raise ValueError("Camera index must be zero or greater.")
-            self.worker.start(index)
+            self.worker.start(parse_camera_source(self.source.get()))
         except Exception as exc:
             self._notice = f"Camera error: {exc}"
             self.status.set(self._notice)

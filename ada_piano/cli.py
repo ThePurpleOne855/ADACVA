@@ -9,6 +9,7 @@ from ada_piano.ai_tutor import Tutor
 from ada_piano.ai_tutor.speech import Feedback
 from ada_piano.music_sheet import load_exercise, note_name
 from ada_piano.sound_sensor import list_ports, midi_notes, simulated_notes, simulated_chords
+from ada_piano.camera.source import parse_camera_source
 
 DEFAULT_EXERCISE = Path(__file__).parent / "exercises" / "five_notes.json"
 
@@ -64,7 +65,10 @@ def main(argv=None) -> int:
         command.add_argument("--end-measure", type=int,
                              help="Last measure position, inclusive (defaults to end of part)")
     camera = commands.add_parser("camera", help="Check camera capture independently")
-    camera.add_argument("--index", type=int, default=0)
+    sources = camera.add_mutually_exclusive_group()
+    sources.add_argument("--source", type=parse_camera_source, default=0,
+                         help="OpenCV camera index, device path or string source (default 0)")
+    sources.add_argument("--index", type=int, help="Compatibility alias for an integer --source")
     camera.add_argument("--seconds", type=float, default=5)
     camera.add_argument("--preview", action="store_true", help="Open an optional visual preview")
     args = parser.parse_args(argv)
@@ -78,7 +82,8 @@ def main(argv=None) -> int:
         elif args.command == "camera":
             from ada_piano.camera import check_camera
             print("Checking camera capture. Press Control C to stop.", flush=True)
-            count = check_camera(args.index, args.seconds, args.preview)
+            source = args.source if args.index is None else args.index
+            count = check_camera(source, args.seconds, args.preview)
             print(f"Camera check complete: {count} frames captured. Hand tracking is not enabled.")
         elif args.command == "midi-ports":
             ports = list_ports()
