@@ -1,22 +1,34 @@
 """Compact coach panel. Workers never touch Tk; actions return through a queue."""
 
 from copy import deepcopy
+import os
 from queue import Empty, Queue
 from threading import Event, Thread
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from ada_piano.voice import VoiceService
-from .coach import Coach
+from .coach import Coach, error_message
+from .cloud_voice import CloudVoiceService, VOICES
+from .session import ChatSession
+from .speech_input import SpeechInput, voice_command
 from .tools import AgentTools, passage_context, select_passage
 
 
 class CoachPanel(ttk.Frame):
-    def __init__(self, parent, score, *, client=None, voice=None):
+    def __init__(self, parent, score=None, *, client=None, voice=None, microphone=None):
         super().__init__(parent, padding=10)
-        self.score = score
+        self.score = score if score is not None else ChatSession()
         self.client = client
-        self.voice = voice if voice is not None else VoiceService()
+        self.voice = voice if voice is not None else CloudVoiceService()
+        self._injected_voice = voice is not None
+        self.microphone = microphone if microphone is not None else SpeechInput()
+        self._api_key = None
+        self._model = os.environ.get("ADA_OPENAI_MODEL", "gpt-4.1-mini")
+        self._request_context_active = False
+        self._speech_done = Event()
+        self._speech_done.set()
+        self._listen_pending = False
         self._queue = Queue()
         self._cancel = Event()
         self._closed = False
@@ -36,23 +48,172 @@ class CoachPanel(ttk.Frame):
         self._request_playback_status = None
         self.text = tk.StringVar()
         self.speak = tk.BooleanVar(value=False)
-        self.status = tk.StringVar(value="ADA ready. Approve a passage first. " + self.voice.status)
+        self.hands_free = tk.BooleanVar(value=False)
+        self.voice_choice = tk.StringVar(value="marin")
+        self.microphone_status = tk.StringVar(value=self.microphone.status)
+        self.connection = tk.StringVar()
+        self._update_connection()
+        self.status = tk.StringVar(value="ADA ready. Ask a piano question, or approve a passage for guided practice.")
         ttk.Label(self, text="ADA Coach").pack(anchor="w")
-        self.transcript = tk.Text(self, height=10, wrap="word", state="disabled")
-        self.transcript.pack(fill="both", expand=True)
-        entry = ttk.Entry(self, textvariable=self.text)
-        entry.pack(fill="x", pady=5)
-        entry.bind("<Return>", lambda event: self.ask())
-        controls = ttk.Frame(self)
+        # Pack the fixed controls first so resizing never hides the input below
+        # the expanding transcript. Display order is transcript, then controls.
+        bottom = ttk.Frame(self)
+        bottom.pack(side="bottom", fill="x")
+        ttk.Label(bottom, text="Your message — type here, or use the microphone:").pack(anchor="w", pady=(6, 2))
+        self.entry = ttk.Entry(bottom, textvariable=self.text, font=("", 13))
+        self.entry.pack(fill="x", ipady=6, pady=(0, 5))
+        self.entry.bind("<Return>", lambda event: self.ask())
+        controls = ttk.Frame(bottom)
         controls.pack(fill="x")
         self.ask_button = ttk.Button(controls, text="Ask ADA", command=self.ask)
         self.ask_button.pack(side="left")
         ttk.Button(controls, text="Stop", command=self.stop).pack(side="left", padx=5)
-        ttk.Checkbutton(controls, text="Speak responses", variable=self.speak,
+        self.listen_button = ttk.Button(controls, text="Speak a question", command=self.listen)
+        self.listen_button.pack(side="left")
+        ttk.Button(controls, text="Save latest attempt", command=self.save_attempt).pack(side="right")
+        voice_controls = ttk.Frame(bottom)
+        voice_controls.pack(fill="x", pady=4)
+        ttk.Checkbutton(voice_controls, text='Hands-free: say "ADA …"', variable=self.hands_free,
+                        command=self._hands_free_changed).pack(side="left", padx=5)
+        ttk.Checkbutton(voice_controls, text="Speak responses", variable=self.speak,
                         command=self._speech_changed).pack(side="left")
-        ttk.Button(controls, text="Save latest attempt", command=self.save_attempt).pack(side="left", padx=5)
-        ttk.Label(self, textvariable=self.status, wraplength=850).pack(anchor="w")
+        ttk.Label(voice_controls, text="Voice:").pack(side="left", padx=(10, 3))
+        self.voice_selector = ttk.Combobox(voice_controls, textvariable=self.voice_choice,
+                                          values=(*VOICES, "System (local)"), state="readonly", width=15)
+        self.voice_selector.pack(side="left")
+        self.voice_selector.bind("<<ComboboxSelected>>", self._voice_changed)
+        self.voice_status = tk.StringVar(value="OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
+        ttk.Label(bottom, textvariable=self.voice_status, wraplength=750).pack(anchor="w")
+        settings = ttk.Frame(bottom)
+        settings.pack(fill="x", pady=4)
+        ttk.Button(settings, text="API settings", command=self.api_settings).pack(side="left")
+        ttk.Label(settings, textvariable=self.connection, wraplength=600).pack(side="left", padx=8)
+        ttk.Label(bottom, textvariable=self.microphone_status, wraplength=950).pack(anchor="w")
+        ttk.Label(bottom, textvariable=self.status, wraplength=950).pack(anchor="w")
+        history = ttk.Frame(self)
+        history.pack(fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(history)
+        scrollbar.pack(side="right", fill="y")
+        self.transcript = tk.Text(history, height=10, wrap="word", state="disabled",
+                                  yscrollcommand=scrollbar.set)
+        self.transcript.pack(fill="both", expand=True)
+        scrollbar.configure(command=self.transcript.yview)
         self._timer = self.after(30, self._poll)
+
+    def _update_connection(self):
+        configured = bool(self._api_key or os.environ.get("OPENAI_API_KEY"))
+        self.connection.set(f"API key: {'set' if configured else 'missing'} · Model: {self._model}")
+
+    def api_settings(self):
+        if self._thread is not None and self._thread.is_alive():
+            self.status.set("Wait for the current request to finish before changing API settings.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("ADA API settings — this session only")
+        dialog.transient(self.winfo_toplevel())
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="OpenAI API key (hidden; leave blank to use OPENAI_API_KEY):").pack(anchor="w")
+        key = tk.StringVar()
+        key_entry = ttk.Entry(frame, textvariable=key, show="•", width=60)
+        key_entry.pack(fill="x", pady=5)
+        ttk.Label(frame, text="Model:").pack(anchor="w")
+        model = tk.StringVar(value=self._model)
+        ttk.Entry(frame, textvariable=model).pack(fill="x", pady=5)
+        ttk.Label(frame, text="Keys are kept in memory for this run. API usage requires API credit.").pack(anchor="w")
+
+        def apply():
+            selected = model.get().strip()
+            if not selected or len(selected) > 100:
+                return
+            self._api_key = key.get().strip() or None
+            self._model = selected
+            key.set("")
+            self._history = []
+            self._update_connection()
+            self.status.set("API settings updated. Type a question and press Ask ADA to test.")
+            dialog.destroy()
+
+        def cancel():
+            key.set("")
+            dialog.destroy()
+
+        ttk.Button(frame, text="Apply for this session", command=apply).pack(pady=(8, 0))
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+        dialog.grab_set()
+        key_entry.focus_set()
+
+    def _say(self, text):
+        self._listen_pending = False
+        self.microphone.stop()
+        if isinstance(self.voice, CloudVoiceService):
+            self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get())
+        self._speech_done = self.voice.say(text)
+        return self._speech_done
+
+    def _voice_changed(self, event=None):
+        if self._injected_voice:
+            return
+        self.voice.close()
+        self.voice = VoiceService() if self.voice_choice.get() == "System (local)" else CloudVoiceService()
+        self.voice_status.set("Local system voice selected." if self.voice_choice.get() == "System (local)" else
+                              "OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
+
+    def listen(self):
+        self.hands_free.set(False)
+        self.microphone.stop()
+        self.voice.stop()
+        self._listen_pending = True
+        if self._microphone_busy():
+            self._listen_pending = False
+            self.microphone_status.set("Stop practice / playback or wait for ADA before speaking a question.")
+            return
+        self._poll_microphone()
+
+    def _hands_free_changed(self):
+        self._listen_pending = False
+        self.microphone.stop()
+        self.voice.stop()
+        self._poll_microphone()
+
+    def _microphone_busy(self):
+        return (self._closed
+                or self.score.playback.player.status.state == "playing"
+                or self._pending_reference is not None
+                or not self._speech_done.is_set())
+
+    def _poll_microphone(self):
+        if not hasattr(self, "microphone"):
+            return  # Lightweight headless test panels have no audio service.
+        if self._microphone_busy():
+            self._listen_pending = False
+            if self.microphone.running:
+                self.microphone.stop()
+            self.microphone_status.set("Microphone paused while ADA speaks or reference sound plays.")
+            return
+        for text in self.microphone.drain():
+            if self.hands_free.get():
+                command = voice_command(text)
+                if command is None:
+                    continue
+                name, question = command
+                if name == "stop":
+                    self.stop()
+                else:
+                    self.text.set(question)
+                    self.ask()
+                break
+            else:
+                self.text.set(text)
+                self.entry.focus_set()
+        if self.hands_free.get() and self.microphone.available and not self._microphone_busy():
+            self.microphone.start(continuous=True)
+        elif self._listen_pending and not self.microphone.running:
+            self._listen_pending = False
+            self.microphone.start(retry=True)
+        if not self.microphone.available:
+            self.hands_free.set(False)
+        self.microphone_status.set(self.microphone.status)
 
     def _append(self, speaker, text):
         self.transcript.configure(state="normal")
@@ -77,22 +238,27 @@ class CoachPanel(ttk.Frame):
         if self.score.tutor is not None or self.score.playback.player.status.state == "playing":
             self.status.set("Stop practice / sound before asking ADA, so speech does not overlap.")
             return
+        if len(question) > 2000:
+            self.status.set("Keep your question under 2,000 characters.")
+            return
+        self.microphone.stop()
+        self.voice.stop()
         review = self.score.loaded
         if review is None:
-            self._append("ADA", "No approved passage is loaded. Review and approve a score first.")
-            return
-        identity = (review.digest, repr(review.selection))
+            self._append("ADA", "No approved passage is loaded. I can answer general piano questions; approve a score for guided practice.")
+        identity = (review.digest, repr(review.selection)) if review else None
         if identity != self._identity:
             self._history = []
             self._identity = identity
         attempt = self.score.latest_attempt
-        summary = attempt.summary() if attempt else None
+        summary = attempt.summary() if attempt and review else None
         if summary and (summary["score_sha256"] != review.digest or
                         any(attempt.context["selection"].get(k) != v for k, v in review.selection.items())):
             summary = None
         snapshot = deepcopy(review)
         token = self._cancel = Event()
         self._request_review = review
+        self._request_context_active = True
         self._request_attempt = attempt if summary else None
         self._activity_version = self.score.activity_version
         self._reference_outcome = None
@@ -111,27 +277,27 @@ class CoachPanel(ttk.Frame):
             return box["result"]
 
         tools = AgentTools(snapshot, summary, action)
-        coach = Coach(tools, self.client)
+        coach = Coach(tools, self.client, api_key=self._api_key, model=self._model)
         coach.history = list(self._history)
 
         def run():
             try:
                 answer = coach.ask(question, token)
                 self._queue.put(("answer", token, (review, answer, coach.history)))
-            except Exception:
+            except Exception as exc:
                 # Avoid leaking SDK errors, credentials or remote payloads into UI/logs.
-                self._queue.put(("error", token, "ADA AI is unavailable. Local pitch/chord practice is still available. Check the agent dependency, OPENAI_API_KEY, model and network."))
+                self._queue.put(("error", token, error_message(exc)))
             finally:
                 coach.close()
         self._thread = Thread(target=run, name="ada-coach", daemon=True)
         self._thread.start()
 
     def _perform(self, review, name, arguments):
+        if review is None or self.score.loaded is not review or not review.approved:
+            return {"status": "rejected", "reason": "Approved selection changed or is not loaded."}
         if self._request_stale():
             self._cancel_request()
             return {"status": "cancelled", "reason": "Local activity changed."}
-        if self.score.loaded is not review or not review.approved:
-            return {"status": "rejected", "reason": "Approved selection changed."}
         if name == "stop_practice":
             self._finish_reference("cancelled")
             self._pending_reference = self._pending_practice = None
@@ -155,7 +321,7 @@ class CoachPanel(ttk.Frame):
             self._request_playback_status = self.score.playback.player.status
             announcement = f"I'll play measure {arguments['start_measure']} through {arguments['end_measure']} once."
             self._append("ADA", announcement)
-            finished = self.voice.say(announcement) if self.speak.get() else Event()
+            finished = self._say(announcement) if self.speak.get() else Event()
             if not self.speak.get():
                 finished.set()
             self._pending_reference = (review, exercise, arguments["tempo"], finished)
@@ -210,7 +376,7 @@ class CoachPanel(ttk.Frame):
                     if attempt and attempt.context["sha256"] == review.digest:
                         attempt.feedback.append(answer)
                     if self.speak.get() and self.score.tutor is None and not self._reference_active and self._pending_reference is None:
-                        self.voice.say(answer)
+                        self._say(answer)
                     self.status.set("ADA ready. " + self.voice.status)
                 else:
                     self._append("ADA", payload)
@@ -224,6 +390,9 @@ class CoachPanel(ttk.Frame):
             self._append("ADA", "Practice or playback is unavailable. MIDI remains independent.")
         if self._thread is None or not self._thread.is_alive():
             self.ask_button.configure(state="normal")
+        self._poll_microphone()
+        if hasattr(self, "voice_status"):
+            self.voice_status.set(self.voice.status + (" AI-generated · Reply text sent to OpenAI · API charges apply." if isinstance(self.voice, CloudVoiceService) else ""))
         if not self._closed:
             self._timer = self.after(30, self._poll)
 
@@ -266,7 +435,7 @@ class CoachPanel(ttk.Frame):
                     self._finish_reference("completed")
                     self._append("ADA", "Your turn.")
                     if self.speak.get():
-                        self._turn_ready = self.voice.say("Your turn.")
+                        self._turn_ready = self._say("Your turn.")
         if (self._pending_practice and not self._reference_active and self._pending_reference is None
                 and (self._turn_ready is None or self._turn_ready.is_set())):
             review, exercise, context = self._pending_practice
@@ -278,9 +447,9 @@ class CoachPanel(ttk.Frame):
 
     def _request_stale(self):
         """Only compare versions captured by this request, never stop newer work."""
-        return self._request_review is not None and (
+        return getattr(self, "_request_context_active", self._request_review is not None) and (
             self.score.loaded is not self._request_review
-            or not self._request_review.approved
+            or (self._request_review is not None and not self._request_review.approved)
             or self.score.activity_version != self._activity_version
             or (not self._reference_active
                 and self._request_playback_status is not None
@@ -303,6 +472,7 @@ class CoachPanel(ttk.Frame):
         self._reference_active = False
         self._turn_ready = None
         self._request_review = None
+        self._request_context_active = False
         self._request_attempt = None
         self.voice.stop()
         self.status.set("ADA request cancelled because local activity changed.")
@@ -324,6 +494,9 @@ class CoachPanel(ttk.Frame):
             Thread(target=save, name="ada-attempt-save", daemon=True).start()
 
     def stop(self):
+        self._listen_pending = False
+        self.hands_free.set(False)
+        self.microphone.stop()
         self._cancel_request()
         self._pending_reference = self._pending_practice = None
         self._reference_active = False
@@ -340,3 +513,5 @@ class CoachPanel(ttk.Frame):
         self.stop()
         self.after_cancel(self._timer)
         self.voice.close()
+        self.microphone.close()
+        self._api_key = None
