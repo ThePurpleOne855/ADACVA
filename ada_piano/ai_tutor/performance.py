@@ -14,8 +14,9 @@ from statistics import median
 from ada_piano.music_sheet import Exercise, note_name
 
 CHORD_GAP = 0.06  # seconds; overlapping attacks closer than this are ordered by pitch
-MAX_EXPECTED = 2000
-MAX_PLAYED = 4000
+# Alignment is O(expected x played) in pure Python on the GUI thread; keep it well under a second.
+MAX_EXPECTED = 600
+MAX_PLAYED = 1200
 MAX_ITEMS = 5  # per measure and category, keeping the model context small
 MAX_MEASURES = 16
 LIMITATIONS = ("Pitch, onset timing relative to your own fitted tempo, hesitations and key-held "

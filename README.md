@@ -1,5 +1,10 @@
 # ADA Piano Teacher
 
+**Voice-first practice:** the app opens on ADA with speech on. Say or type
+"practice Für Elise", then "record", play, and pause: ADA reports wrong,
+missed and extra notes, tempo and hesitations per measure. F1 talk, F5 record,
+F6 results, Esc stop. See [Voice-first practice](docs/ACCESSIBLE_PRACTICE.md).
+
 The **Scores · import & practice** tab supports local PDF conversion through
 Audiveris, MusicXML review, approved-passage playback, and live pitch/chord
 practice. See the [PDF import workflow](docs/SCORE_IMPORT.md) for setup and the

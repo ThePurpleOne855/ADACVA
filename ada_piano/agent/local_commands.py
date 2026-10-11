@@ -20,7 +20,7 @@ _LIST = re.compile(r"\b(what|which|list|show)\b.*\b(pieces|songs|music|scores)\b
 _REFERENCE = re.compile(r"\b(play it for me|play it|let me hear|listen|demonstrate|how does it (go|sound))\b")
 _RECORD = re.compile(r"\b(record|recording|ready|let me (play|try)|start|play through|playthrough)\b")
 _RESULTS = re.compile(r"\b(how did i do|how was (that|it)|results?|feedback|score me|grade)\b")
-_QUESTION = re.compile(r"\b(why|what|how|who|when|where|tell|about|history|explain|which)\b")
+_QUESTION = re.compile(r"\b(why|what|how|who|when|where|tell|about|history|explain|which|is|are|was|does|hard|easy|love|like|famous|favorite|favourite)\b")
 _HANDS = {"right": re.compile(r"\bright\b"), "left": re.compile(r"\bleft\b"),
           "both": re.compile(r"\b(both|two) hands?\b")}
 
@@ -36,7 +36,10 @@ def parse(text, catalog):
         return None
     if _STOP.match(plain):
         return "stop", {}
-    if _HELP.search(plain):
+    # Short commands only, so questions like "can you help me with measure three in the
+    # left hand" or "where should I start" still reach the coach.
+    short = len(plain.split()) <= 6
+    if _HELP.search(plain) and short:
         return "help", {}
     piece = pieces.find(plain, catalog)
     if piece is not None and not _QUESTION.search(plain):
@@ -48,9 +51,9 @@ def parse(text, catalog):
         return "list", {}
     if _RESULTS.search(plain):
         return "results", {}
-    if _REFERENCE.search(plain):
+    if _REFERENCE.search(plain) and short:
         return "reference", {}
-    if _RECORD.search(plain) and len(plain.split()) <= 6:
+    if _RECORD.search(plain) and short and not _QUESTION.search(plain):
         return "record", {}
     return None
 

@@ -184,8 +184,10 @@ class CoachPanel(ttk.Frame):
         self._append("You", question)
         self.text.set("")
         if name == "stop":
+            take = getattr(self.score, "take", None)
             self.stop()
-            self.announce("Stopped.")
+            if take is None or not take.notes:  # otherwise stop() just announced the take's results
+                self.announce("Stopped.")
         elif name == "help":
             self.announce(local_commands.HELP)
         elif name == "list":
@@ -496,6 +498,10 @@ class CoachPanel(ttk.Frame):
                     if self.speak.get() and self.score.tutor is None and not self._reference_active and self._pending_reference is None:
                         self._say(answer)
                     self.status.set("ADA ready. " + self.voice.status)
+                    if (self._pending_reference is None and self._pending_practice is None
+                            and not self._reference_active):
+                        # Request delivered: later local activity must not "cancel" it and silence announcements.
+                        self._request_context_active = False
                 else:
                     self._append("ADA", payload)
                     self.status.set(payload)

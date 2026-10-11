@@ -28,6 +28,7 @@ class NoteReaderWindow:
         self._timer = None
         self._closed = False
         self._last_played = None
+        self._user_disconnected = False
         self.root.title("Piano & Camera — ADA Piano Teacher")
         self.root.geometry("1400x850")
         self.root.minsize(1100, 760)
@@ -145,9 +146,11 @@ class NoteReaderWindow:
         self.coach.ask()
 
     def stop_all(self):
+        take = self.score.take
         self.coach.stop()
         self.playback.stop()
-        self._announce("Stopped.")
+        if take is None or not take.notes:  # otherwise the take's results were just announced
+            self._announce("Stopped.")
 
     def _show_state(self):
         state = self.reader.state
@@ -179,8 +182,10 @@ class NoteReaderWindow:
     def _instrument_ports(ports):
         return [port for port in ports if "midi through" not in port.lower()]
 
-    def _error(self, exc):
-        was_connected = self.reader.connected
+    def _error(self, exc, was_connected=None):
+        # NoteReader disconnects itself before raising, so callers pass the earlier state.
+        if was_connected is None:
+            was_connected = self.reader.connected
         self.score.stop_practice()
         self.demo = False
         try:
@@ -210,6 +215,7 @@ class NoteReaderWindow:
             self._error(exc)
 
     def connect(self):
+        self._user_disconnected = False
         try:
             self.demo = False
             self.reader.connect(self.port.get())
@@ -225,6 +231,7 @@ class NoteReaderWindow:
             self._error(exc)
 
     def disconnect(self):
+        self._user_disconnected = True  # no accessible auto-reconnect until Connect is used again
         self.score.stop_practice()
         self.demo = False
         self.playback.stop()
@@ -283,6 +290,7 @@ class NoteReaderWindow:
         self.log.see(row)
 
     def _tick(self):
+        was_connected = self.reader.connected
         try:
             now = monotonic()
             if self.demo:
@@ -291,7 +299,8 @@ class NoteReaderWindow:
                     if event is not None:
                         self._record(event, source="Demo")
                     self._demo_due = now + 0.4
-            elif self.accessible and not self.reader.connected and now >= self._next_scan:
+            elif (self.accessible and not self.reader.connected and not self._user_disconnected
+                  and now >= self._next_scan):
                 self._next_scan = now + 3
                 candidates = self._instrument_ports(self.reader.list_ports())
                 if len(candidates) == 1:
@@ -309,7 +318,7 @@ class NoteReaderWindow:
                                        event.timestamp, event.duration), source="Reference")
             self._show_state()
         except Exception as exc:
-            self._error(exc)
+            self._error(exc, was_connected)
         finally:
             if not self._closed:
                 self._timer = self.root.after(20, self._tick)

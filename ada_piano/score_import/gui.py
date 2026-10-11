@@ -8,7 +8,7 @@ import webbrowser
 
 from ada_piano import pieces
 from ada_piano.ai_tutor import Tutor
-from ada_piano.ai_tutor.performance import PlayThrough, compare, describe
+from ada_piano.ai_tutor.performance import PlayThrough, compare, describe, expected_notes
 from ada_piano.music_sheet import note_name
 from ada_piano.sound_sensor import NoteEvent
 from .conversion import ScoreImporter, score_parts
@@ -216,9 +216,15 @@ class ScorePanel(ttk.Frame):
         if self.playback.player.status.state == "playing":
             self._say("Wait for the reference to finish before recording.")
             return False
+        exercise = exercise if exercise is not None else self.loaded.exercise
+        try:
+            expected_notes(exercise)  # reject an over-long passage before the learner plays it
+        except ValueError as exc:
+            self._say(str(exc))
+            return False
         self.stop_practice()
         self.take = PlayThrough(monotonic())
-        self.take_exercise = exercise if exercise is not None else self.loaded.exercise
+        self.take_exercise = exercise
         self.take_context = context if context is not None else self.loaded.context()
         if tempo is not None:
             self.take_tempo = tempo
@@ -239,7 +245,8 @@ class ScorePanel(ttk.Frame):
         self.latest_performance = {
             "score_sha256": context["sha256"], "selection": context["selection"],
             "title": context["title"], "report": report, "feedback": []}
-        self.activity_version += 1
+        # No activity_version bump: scoring ends the take rather than starting new activity,
+        # and a bump would make the coach cancel its request and silence this summary.
         self._say(describe(report))
         return report
 
@@ -248,7 +255,9 @@ class ScorePanel(ttk.Frame):
         latest = self.latest_performance
         if latest is None or self.loaded is None:
             return None
-        if latest["score_sha256"] != self.loaded.digest or latest["selection"] != self.loaded.selection:
+        # Coach-started takes add measure-label keys to the selection; match on the loaded keys.
+        if latest["score_sha256"] != self.loaded.digest or any(
+                latest["selection"].get(k) != v for k, v in self.loaded.selection.items()):
             return None
         return latest["report"]
 

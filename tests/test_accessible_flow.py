@@ -9,6 +9,7 @@ from test_agent_gui import FakeVoice
 from test_note_reader import note
 
 from ada_piano import pieces
+from ada_piano.agent.local_commands import parse
 from ada_piano.agent.tools import AgentTools
 
 ODE = [64, 64, 65, 67, 67, 65, 64, 62, 60, 60, 62, 64, 64, 62, 62,
@@ -89,6 +90,31 @@ class AccessibleFlowTests(unittest.TestCase):
         self.assertEqual(outputs[0]["status"], "loaded")
         self.assertNotIn("_review", outputs[0])
         self.assertEqual(outputs[1]["status"], "recording")
+        # Coach-started takes carry measure labels but still count for this passage,
+        # and scoring them is spoken without being cancelled as "local activity".
+        self.play([76, 75, 76, 75, 76, 71, 74, 72, 69])
+        with patch("ada_piano.score_import.gui.monotonic", return_value=10 ** 6):
+            self.run_gui(200)
+        self.assertIsNotNone(self.window.score.performance_summary())
+        self.assertIn("notes correct", coach.voice.messages[-1])
+        self.assertNotIn("cancelled", coach.status.get())
+
+    def test_unplugging_is_announced_and_manual_disconnect_is_respected(self):
+        coach = self.panel()
+        self.window.accessible = True
+        self.backend.names = []
+        self.window._check_due = 0
+        self.run_gui(60)
+        self.assertIn("disconnected", coach.voice.messages[-1])
+        self.backend.names = ["USB MIDI"]
+        self.window._next_scan = 0
+        self.run_gui(60)
+        self.assertTrue(self.reader.connected)
+        self.assertEqual(coach.voice.messages[-1], "Piano connected.")
+        self.window.disconnect()
+        self.window._next_scan = 0
+        self.run_gui(60)
+        self.assertFalse(self.reader.connected)
 
     def test_report_reaches_model_evidence(self):
         coach = self.panel(FakeClient([answer("Measure two: F, not F sharp.")]))
@@ -101,6 +127,21 @@ class AccessibleFlowTests(unittest.TestCase):
         evidence = [m for m in coach.client.requests[0][0] if m.get("role") == "developer"][0]["content"]
         self.assertIn('"wrong": 1', evidence)
         self.assertIn("F sharp4", evidence)
+
+
+class CommandTests(unittest.TestCase):
+    def test_commands_versus_questions(self):
+        catalog = pieces.catalog()
+        cases = {"stop": "stop", "help": "help", "record": "record", "I'm ready": "record",
+                 "how did I do": "results", "play it for me": "reference", "list pieces": "list",
+                 "Can I practice Für Elise?": "load", "Where should I start?": None,
+                 "Is Für Elise hard?": None, "I love Ode to Joy": None,
+                 "Can you help me with measure 3 in the left hand?": None,
+                 "What should I work on?": None}
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                result = parse(text, catalog)
+                self.assertEqual(result and result[0], expected)
 
 
 class ToolTests(unittest.TestCase):
