@@ -119,6 +119,7 @@ class NoteReaderGuiTests(unittest.TestCase):
         panel = self.window.camera
         with patch("ada_piano.camera.gui.camera_choices", return_value={"Built-in": 0, "USB camera": 4}):
             panel.refresh()
+        panel.selection.set("Built-in")
         panel.start()
         self.run_gui()
         panel.selection.set("USB camera")
