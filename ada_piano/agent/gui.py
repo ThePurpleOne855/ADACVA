@@ -29,6 +29,11 @@ class CoachPanel(ttk.Frame):
         self._reference_review = None
         self._turn_ready = None
         self._activity_version = None
+        self._request_review = None
+        self._request_attempt = None
+        self._reference_outcome = None
+        self._reference_waiter = None
+        self._request_playback_status = None
         self.text = tk.StringVar()
         self.speak = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="ADA ready. Approve a passage first. " + self.voice.status)
@@ -87,6 +92,11 @@ class CoachPanel(ttk.Frame):
             summary = None
         snapshot = deepcopy(review)
         token = self._cancel = Event()
+        self._request_review = review
+        self._request_attempt = attempt if summary else None
+        self._activity_version = self.score.activity_version
+        self._reference_outcome = None
+        self._request_playback_status = self.score.playback.player.status
         self._append("You", question)
         self.text.set("")
         self.status.set("Thinking…")
@@ -117,30 +127,42 @@ class CoachPanel(ttk.Frame):
         self._thread.start()
 
     def _perform(self, review, name, arguments):
+        if self._request_stale():
+            self._cancel_request()
+            return {"status": "cancelled", "reason": "Local activity changed."}
         if self.score.loaded is not review or not review.approved:
             return {"status": "rejected", "reason": "Approved selection changed."}
         if name == "stop_practice":
+            self._finish_reference("cancelled")
             self._pending_reference = self._pending_practice = None
             self._reference_active = False
             self.voice.stop()
             self.score.stop()
             self._activity_version = self.score.activity_version
+            self._request_playback_status = self.score.playback.player.status
             return {"status": "stopped"}
+        if name == "play_reference":
+            self._reference_outcome = "failed"
         exercise = select_passage(review, arguments["start_measure"], arguments["end_measure"])
         if name == "play_reference":
+            self._reference_outcome = "declined"
             if not messagebox.askyesno("ADA reference", f"Play approved measures {arguments['start_measure']}–{arguments['end_measure']} at {arguments['tempo']} BPM?", parent=self):
                 return {"status": "declined"}
-            if self._cancel.is_set() or self.score.loaded is not review or not review.approved:
+            if self._cancel.is_set() or self._request_stale() or self.score.loaded is not review or not review.approved:
                 return {"status": "cancelled", "reason": "Request or approval changed during confirmation."}
             self.score.stop()
             self._activity_version = self.score.activity_version
+            self._request_playback_status = self.score.playback.player.status
             announcement = f"I'll play measure {arguments['start_measure']} through {arguments['end_measure']} once."
             self._append("ADA", announcement)
             finished = self.voice.say(announcement) if self.speak.get() else Event()
             if not self.speak.get():
                 finished.set()
             self._pending_reference = (review, exercise, arguments["tempo"], finished)
+            self._reference_outcome = "pending"
             return {"status": "queued", "announcement": announcement}
+        if self._reference_outcome in ("failed", "cancelled", "declined"):
+            return {"status": "rejected", "reason": "Reference did not finish. Ask again to start a new practice request."}
         context = passage_context(review)
         context["selection"] = {**context["selection"], "start_measure_label": arguments["start_measure"], "end_measure_label": arguments["end_measure"]}
         chosen = set(e.measure for e in exercise.events)
@@ -155,10 +177,13 @@ class CoachPanel(ttk.Frame):
             return {"status": "queued_after_reference"}
         self.voice.stop()
         self.score.practice(exercise, context)
+        self._activity_version = self.score.activity_version
         self.status.set(self.score.feedback.get())
         return {"status": "practicing" if self.score.tutor is not None else "unavailable"}
 
     def _poll(self):
+        if self._request_stale():
+            self._cancel_request()
         try:
             while True:
                 kind, token, payload = self._queue.get_nowait()
@@ -168,17 +193,20 @@ class CoachPanel(ttk.Frame):
                     review, name, args, done, box = payload
                     try:
                         box["result"] = self._perform(review, name, args)
+                        if name == "play_reference" and box["result"]["status"] == "queued":
+                            self._reference_waiter = (done, box)
                     except Exception:
                         box["result"] = {"status": "failed", "reason": "Application action unavailable."}
                     finally:
-                        done.set()
+                        if self._reference_waiter is None or self._reference_waiter[0] is not done:
+                            done.set()
                 elif kind == "answer":
                     review, answer, history = payload
                     if self.score.loaded is not review:
                         continue
                     self._history = history
                     self._append("ADA", answer)
-                    attempt = self.score.latest_attempt
+                    attempt = self._request_attempt
                     if attempt and attempt.context["sha256"] == review.digest:
                         attempt.feedback.append(answer)
                     if self.speak.get() and self.score.tutor is None and not self._reference_active and self._pending_reference is None:
@@ -202,35 +230,40 @@ class CoachPanel(ttk.Frame):
     def _advance_actions(self):
         if ((self._pending_reference or self._reference_active or self._pending_practice)
                 and self.score.activity_version != self._activity_version):
-            self.stop()
+            self._cancel_request()
             return
         if self.score.tutor is not None:
             self.voice.stop()
         if self._pending_reference:
             review, exercise, tempo, finished = self._pending_reference
             if self.score.loaded is not review:
-                self.stop()
+                self._cancel_request()
                 return
             if finished.is_set():
                 self._pending_reference = None
                 self.score.playback.tempo.set(str(tempo))
                 self.score.playback.play_exercise(exercise)
+                self._request_playback_status = self.score.playback.player.status
                 self._reference_active = self.score.playback.player.status.state == "playing"
                 self._reference_review = review
                 self.status.set(self.score.playback.status.get())
                 if not self._reference_active:
                     self._pending_practice = None
+                    self._finish_reference("failed")
         if self._reference_active:
             if self.score.loaded is not self._reference_review:
-                self.stop()
+                self._cancel_request()
                 return
             state = self.score.playback.player.status.state
+            self._request_playback_status = self.score.playback.player.status
             if state != "playing":
                 self._reference_active = False
                 if state != "finished":
+                    self._finish_reference("failed")
                     self._pending_practice = None
                     self._append("ADA", "Reference stopped or failed. Practice was not started.")
                 else:
+                    self._finish_reference("completed")
                     self._append("ADA", "Your turn.")
                     if self.speak.get():
                         self._turn_ready = self.voice.say("Your turn.")
@@ -240,7 +273,39 @@ class CoachPanel(ttk.Frame):
             self._pending_practice = None
             if self.score.loaded is review:
                 self.score.practice(exercise, context)
+                self._activity_version = self.score.activity_version
                 self.status.set(self.score.feedback.get())
+
+    def _request_stale(self):
+        """Only compare versions captured by this request, never stop newer work."""
+        return self._request_review is not None and (
+            self.score.loaded is not self._request_review
+            or not self._request_review.approved
+            or self.score.activity_version != self._activity_version
+            or (not self._reference_active
+                and self._request_playback_status is not None
+                and self.score.playback.player.status != self._request_playback_status)
+        )
+
+    def _finish_reference(self, outcome):
+        self._reference_outcome = outcome
+        if self._reference_waiter is not None:
+            done, box = self._reference_waiter
+            self._reference_waiter = None
+            box["result"] = {"status": outcome}
+            done.set()
+
+    def _cancel_request(self):
+        """Invalidate agent work without stopping a user's newer local session."""
+        self._cancel.set()
+        self._finish_reference("cancelled")
+        self._pending_reference = self._pending_practice = None
+        self._reference_active = False
+        self._turn_ready = None
+        self._request_review = None
+        self._request_attempt = None
+        self.voice.stop()
+        self.status.set("ADA request cancelled because local activity changed.")
 
     def save_attempt(self):
         attempt = self.score.latest_attempt
@@ -259,7 +324,7 @@ class CoachPanel(ttk.Frame):
             Thread(target=save, name="ada-attempt-save", daemon=True).start()
 
     def stop(self):
-        self._cancel.set()
+        self._cancel_request()
         self._pending_reference = self._pending_practice = None
         self._reference_active = False
         self._turn_ready = None
