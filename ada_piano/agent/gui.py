@@ -225,11 +225,11 @@ class CoachPanel(ttk.Frame):
         elif name == "reference":
             self._local_reference()
         elif name == "replay":
+            self.stop()  # scores a take still in progress, so the replay is the one just played
             plan = self.score.replay_plan()
             if not plan:
                 self.announce("There's no recording of this passage yet. Say record, then play.")
             else:
-                self.stop()
                 self._queue_local_sound(plan, 60, "Here's how your last play-through sounded.")
         elif name in ("camera", "camera_off"):
             if self.camera is None:
@@ -285,8 +285,8 @@ class CoachPanel(ttk.Frame):
 
     def listen_after_speech(self, tries=600):
         """Open the microphone once ADA finishes speaking (e.g. after a question)."""
-        if self._closed or not self.microphone.available:
-            return
+        if self._closed or not self.microphone.available or self.hands_free.get() or self.microphone.running:
+            return  # the learner already chose how to talk; listen() would switch hands-free off
         if not self._speech_done.is_set():
             if tries:
                 self.after(100, lambda: self.listen_after_speech(tries - 1))
@@ -498,6 +498,8 @@ class CoachPanel(ttk.Frame):
         return {"status": "queued", "announcement": announcement}
 
     def _perform_sound(self, name, arguments):
+        if not hasattr(self.score.playback, "play_plan"):
+            return {"status": "unavailable", "reason": "No piano sound output in this window."}
         review = self.score.loaded
         if review is not None and self._request_review is not review:
             return {"status": "rejected", "reason": "The loaded passage changed."}
@@ -600,6 +602,8 @@ class CoachPanel(ttk.Frame):
                 return
             if finished.is_set():
                 self._pending_reference = None
+                # A passage invites the learner to play; a demo or replayed take does not.
+                self._turn_after_sound = not isinstance(exercise, list)
                 if isinstance(exercise, list):  # coach-chosen notes or a replayed take
                     self.score.playback.play_plan(exercise, tempo)
                 else:
@@ -626,9 +630,10 @@ class CoachPanel(ttk.Frame):
                     self._append("ADA", "Reference stopped or failed. Practice was not started.")
                 else:
                     self._finish_reference("completed")
-                    self._append("ADA", "Your turn.")
-                    if self.speak.get():
-                        self._turn_ready = self._say("Your turn.")
+                    if getattr(self, "_turn_after_sound", True):
+                        self._append("ADA", "Your turn.")
+                        if self.speak.get():
+                            self._turn_ready = self._say("Your turn.")
         if (self._pending_practice and not self._reference_active and self._pending_reference is None
                 and (self._turn_ready is None or self._turn_ready.is_set())):
             review, exercise, context, *mode = self._pending_practice

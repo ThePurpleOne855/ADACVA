@@ -1,5 +1,6 @@
 """Audible-reference controls. MIDI scheduling stays in ReferencePlayer."""
 
+from dataclasses import replace
 import re
 import tkinter as tk
 from tkinter import ttk
@@ -126,7 +127,9 @@ class PlaybackPanel(ttk.Frame):
         try:
             if not self.output.get():
                 self.refresh()
-            self.player.play_notes(list(notes), port_name=self.output.get(), tempo=tempo)
+            channel = int(self.channel.get())  # same output channel as score references
+            self.player.play_notes([replace(note, channel=channel) for note in notes],
+                                   port_name=self.output.get(), tempo=tempo)
             self._last_status = self.player.status
             self.status.set(self._last_status.detail)
         except Exception as exc:

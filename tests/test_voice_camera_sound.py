@@ -83,6 +83,17 @@ class PiperTests(unittest.TestCase):
         self.assertIn("voice-setup", service.status)
 
 
+class ReplayCommandTests(unittest.TestCase):
+    def test_feedback_questions_are_not_replay(self):
+        from ada_piano import pieces
+        from ada_piano.agent.local_commands import parse
+        catalog = pieces.catalog()
+        for text in ("What's wrong with my playing?", "How was my playing?"):
+            self.assertNotEqual((parse(text, catalog) or [None])[0], "replay")
+        for text in ("replay", "play it back", "let me hear myself"):
+            self.assertEqual(parse(text, catalog)[0], "replay")
+
+
 class SoundToolTests(unittest.TestCase):
     def test_play_notes_validation(self):
         calls = []
@@ -132,6 +143,7 @@ class WindowTests(unittest.TestCase):
         dialog.assert_not_called()
         self.assertEqual([n.note for n in play.call_args.args[0]], [60, 64, 67])
         self.assertIn("Here's the chord", coach.transcript.get("1.0", "end"))
+        self.assertNotIn("Your turn", coach.transcript.get("1.0", "end"))
 
     def test_replay_own_take_by_voice(self):
         coach = self.coach()

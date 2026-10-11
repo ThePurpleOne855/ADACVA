@@ -4,6 +4,7 @@ The model loads once on a background thread; each utterance is synthesized to
 a temporary WAV and played by the native player, which stop() terminates.
 """
 from collections import deque
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -32,12 +33,9 @@ def model_path():
     return Path(configured) if configured else voice_dir() / f"{DEFAULT_VOICE}.onnx"
 
 
-def available():
-    try:
-        import piper  # noqa: F401
-    except ImportError:
-        return False
-    return model_path().is_file()
+def available(model=None):
+    """Cheap check (no onnxruntime import on the GUI thread): package present and model downloaded."""
+    return importlib.util.find_spec("piper") is not None and Path(model or model_path()).is_file()
 
 
 def download(name=DEFAULT_VOICE):
@@ -67,8 +65,11 @@ class PiperVoiceService:
         self._command = player or playback_command
         self._loader = loader
         self._model_path = Path(model) if model else model_path()
-        self.available = self._command("probe.wav") is not None and (loader is not None or available())
+        has_player = self._command("probe.wav") is not None
+        self.available = has_player and (loader is not None or available(self._model_path))
         self.status = ("Natural offline voice ready." if self.available else
+                       "Audio player unavailable; continuing in text mode."
+                       if not has_player else
                        "Offline voice not installed; run: uv run ada-piano voice-setup")
         self._voice = None
         self._condition = Condition()

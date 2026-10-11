@@ -44,10 +44,14 @@ def best_camera(device_root=Path("/sys/class/video4linux"), environ=os.environ):
     """
     configured = environ.get("ADA_CAMERA", "").strip()
     if configured:
-        return parse_camera_source(configured), "the camera set in ADA_CAMERA"
+        try:
+            return parse_camera_source(configured), "the camera set in ADA_CAMERA"
+        except ValueError:
+            pass  # a bad setting must not stop the window from opening; pick a device instead
     real = [(label, index) for label, index in camera_choices(device_root).items() if not VIRTUAL.search(label)]
     external = [(label, index) for label, index in real if not BUILT_IN.search(label)]
-    if external or real:
-        label, index = (external or real)[0]
+    chosen = external or real
+    if chosen:
+        label, index = chosen[0]
         return index, label.rsplit(" (camera", 1)[0]
     return 0, "camera 0"

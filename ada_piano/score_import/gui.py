@@ -264,8 +264,11 @@ class ScorePanel(ttk.Frame):
             offset = onset - start
             if offset >= 295:
                 break
-            length = max(0.05, min((release or onset + 0.5) - onset, 300 - offset))
-            notes.append(PlaybackNote(pitch, round(offset, 3), round(length, 3), max(1, min(127, velocity)), 1))
+            # Round start and end on the same millisecond grid and end 1 ms early, so a key
+            # retriggered exactly at its release never overlaps itself after rounding.
+            begin = round(offset, 3)
+            end = round(min(max((release or onset + 0.5) - start, offset + 0.05), 300), 3)
+            notes.append(PlaybackNote(pitch, begin, round(end - begin - 0.001, 3), max(1, min(127, velocity)), 1))
         return notes
 
     def performance_summary(self):
