@@ -2,13 +2,17 @@
 
 import gc
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch, PropertyMock
 
 from ada_piano.note_reader import NoteReader
 from test_note_reader import FakeBackend, note, control
 from ada_piano.playback import ReferencePlayer
 from test_playback import FakeOutputBackend, message
 from ada_piano.camera.stream import CameraFrame
+from ada_piano.score_import.conversion import ScoreImporter
+from test_musicxml import note as score_note, score
 
 
 class FakeCameraWorker:
@@ -17,9 +21,11 @@ class FakeCameraWorker:
         self.closed = False
         self.status = "Camera off."
         self.frame = None
+        self.started = []
 
     def start(self, source):
         self.source = source
+        self.started.append(source)
         self.running = True
         self.status = "Tracking 1 hand(s)."
         self.frame = CameraFrame(b"P6\n2 2\n255\n" + bytes([0, 255, 0]) * 4, 1)
@@ -87,6 +93,8 @@ class NoteReaderGuiTests(unittest.TestCase):
 
     def test_camera_source_field_accepts_v4l2_device(self):
         self.window.camera.source.set("/dev/video2")
+        self.window.camera.refresh()
+        self.assertEqual(self.window.camera.source.get(), "/dev/video2")
         self.window.camera.start()
         self.assertEqual(self.camera_worker.source, "/dev/video2")
         self.assertNotEqual(str(self.window.camera.source_field.cget("state")), "readonly")
@@ -102,6 +110,105 @@ class NoteReaderGuiTests(unittest.TestCase):
         self.assertIn("Device unavailable", self.window.camera.status.get())
         self.assertIn("C4", self.window.latest.get())
         self.assertTrue(self.reader.connected)
+
+    def test_camera_selector_switches_without_disconnecting_midi(self):
+        panel = self.window.camera
+        with patch("ada_piano.camera.gui.camera_choices", return_value={"Built-in": 0, "USB camera": 4}):
+            panel.refresh()
+        panel.start()
+        self.run_gui()
+        panel.selection.set("USB camera")
+        panel._selected()
+        self.run_gui()
+        self.assertEqual(self.camera_worker.started, [0, 4])
+        self.assertTrue(self.reader.connected)
+        self.assertIn("Camera 4", panel.status.get())
+
+    def load_score_preview(self, content=None):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        folder = Path(temporary.name)
+        source = folder / "melody.musicxml"
+        source.write_text(score(score_note() if content is None else content), encoding="utf-8")
+        panel = self.window.score
+        panel.importer = ScoreImporter(folder / "library")
+        panel.import_file(source)
+        self.run_gui(250)
+        self.assertEqual(panel.importer.status.state, "ready")
+        panel.preview()
+        self.assertIsNotNone(panel.review, panel.status.get())
+        return panel
+
+    def test_repeat_preview_and_mode_change_invalidates_approval(self):
+        panel = self.load_score_preview('<barline><repeat direction="forward"/></barline>' + score_note())
+        panel.confirmed.set(True)
+        panel.approve()
+        self.assertTrue(panel.agent_context()["selection"]["written_order"])
+        panel.written_order.set(False)
+        self.assertIsNone(panel.loaded)
+        self.assertIsNone(panel.review)
+        panel.preview()
+        self.assertIn('repeat', panel.status.get())
+
+    def test_score_requires_approval_and_selection_changes_invalidate_it(self):
+        panel = self.load_score_preview()
+        panel.approve()
+        self.assertIsNone(panel.loaded)
+        panel.confirmed.set(True)
+        panel.approve()
+        self.assertIsNotNone(panel.loaded, panel.status.get())
+        self.assertEqual(panel.agent_context()["events"][0]["tones"][0]["pitch"], 60)
+        self.assertTrue((panel._folder / "reviewed-exercise.json").exists())
+        panel.voice.set("1")
+        self.assertIsNone(panel.loaded)
+        self.assertIsNone(panel.review)
+        self.assertFalse(panel.confirmed.get())
+        self.assertEqual(str(panel.play_button["state"]), "disabled")
+
+    def test_approved_score_plays_and_reference_does_not_grade_practice(self):
+        panel = self.load_score_preview()
+        panel.confirmed.set(True)
+        panel.approve()
+        self.window.playback.tempo.set("300")
+        panel.play()
+        self.run_gui(300)
+        sent = [m.note for m in self.output_backend.port.messages if m.type == "note_on"]
+        self.assertEqual(sent, [60])
+        self.assertIsNone(panel.tutor)
+        panel.practice()
+        self.assertIsNotNone(panel.tutor)
+        event = self.reader.state.consume(note())
+        panel.observe(event, "Reference")
+        panel.observe(event, "Demo")
+        self.assertEqual(panel.tutor.position, 0)
+        panel.observe(event, "Piano")
+        self.assertIn("Exercise complete", panel.feedback.get())
+        self.assertIsNone(panel.tutor)
+
+    def test_score_import_error_does_not_disconnect_midi(self):
+        panel = self.window.score
+        panel.import_file("/missing/file.pdf")
+        self.assertIn("Cannot import", panel.status.get())
+        self.assertTrue(self.reader.connected)
+
+    def test_failed_pdf_keeps_preview_disabled_and_preserves_reason(self):
+        from ada_piano.score_import.conversion import ImportStatus
+        panel = self.window.score
+        self.assertEqual(str(panel.preview_button["state"]), "disabled")
+        with patch.object(type(panel.importer), "status", new_callable=PropertyMock) as status:
+            status.return_value = ImportStatus("error", "Audiveris was not found.")
+            panel.preview()
+        self.assertIn("No MusicXML", panel.status.get())
+        self.assertIn("Audiveris was not found", panel.status.get())
+        self.assertIsNone(panel.review)
+
+    def test_score_cannot_replace_automatic_converter(self):
+        panel = self.window.score
+        with patch("ada_piano.score_import.gui.filedialog.askopenfilename", return_value="/scores/fur_elise.pdf"):
+            panel.choose_executable()
+        self.assertEqual(panel.executable.get(), "auto")
+        self.assertIn("Choose PDF / MusicXML", panel.status.get())
+        self.assertIn("automatic", panel.converter_label.get())
 
     def test_live_notes_and_stop(self):
         self.window.connect()

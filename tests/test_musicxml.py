@@ -45,6 +45,26 @@ class MusicXMLTests(unittest.TestCase):
         content='<attributes><key><fifths>1</fifths></key></attributes>'
         self.assertEqual(self.load(score(content+note("F", alter='<alter>1</alter>'))).notes, (66,))
 
+    def test_written_order_reads_repeats_and_endings_once(self):
+        xml = measures('<barline><repeat direction="forward"/></barline>' + note(),
+                       '<barline><ending number="1" type="start"/></barline>' + note('D'),
+                       note('E') + '<barline><ending number="1" type="stop"/><repeat direction="backward"/></barline>')
+        with self.assertRaisesRegex(ValueError, 'repeat'):
+            self.load(xml)
+        result = self.load(xml, written_order=True)
+        self.assertEqual(result.notes, (60, 62, 64))
+        self.assertEqual([e.onset for e in result.events], [0, 1, 2])
+        self.assertIn('written order', result.title)
+        self.assertEqual(self.load(xml, start_measure=3, written_order=True).notes, (64,))
+        with self.assertRaisesRegex(ValueError, 'repeat ending'):
+            self.load(xml, start_measure=3)
+
+    def test_written_order_still_rejects_pitch_changes_and_jumps(self):
+        for feature in ('<attributes><transpose><chromatic>2</chromatic></transpose></attributes>',
+                        '<direction><sound dacapo="yes"/></direction>'):
+            with self.subTest(feature=feature), self.assertRaises(ValueError):
+                self.load(score(feature + note()), written_order=True)
+
     def test_voice_selection(self):
         content=note(extra='<voice>1</voice><staff>1</staff>')
         content+='<backup><duration>1</duration></backup>'+note('E',extra='<voice>2</voice><staff>2</staff>')

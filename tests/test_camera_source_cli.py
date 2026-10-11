@@ -82,15 +82,16 @@ class CameraPanelInputTests(unittest.TestCase):
     def test_generic_source_start_callback(self):
         for text, expected in [("0", 0), ("2", 2), ("/dev/video2", "/dev/video2")]:
             with self.subTest(source=text):
-                panel = SimpleNamespace(source=MagicMock(), worker=MagicMock(), status=MagicMock())
+                panel = SimpleNamespace(source=MagicMock(), controller=MagicMock(), status=MagicMock(),
+                                        _choices={}, _clear_preview=MagicMock())
                 panel.source.get.return_value = text
                 CameraPanel.start(panel)
-                panel.worker.start.assert_called_once_with(expected)
+                panel.controller.start.assert_called_once_with(expected)
                 self.assertIsNone(panel._notice)
 
     def test_invalid_source_does_not_start_worker(self):
-        panel = SimpleNamespace(source=MagicMock(), worker=MagicMock(), status=MagicMock())
+        panel = SimpleNamespace(source=MagicMock(), controller=MagicMock(), status=MagicMock(), _choices={})
         panel.source.get.return_value = ""
         CameraPanel.start(panel)
-        panel.worker.start.assert_not_called()
+        panel.controller.start.assert_not_called()
         self.assertIn("cannot be empty", panel._notice)

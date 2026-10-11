@@ -1,7 +1,9 @@
 # ADA Piano Teacher
 
-MusicXML import is available for single-note and chord pitch practice. See
-[importing existing sheet music](docs/MUSICXML.md) for supported files and limits.
+The **Scores · import & practice** tab supports local PDF conversion through
+Audiveris, MusicXML review, approved-passage playback, and live pitch/chord
+practice. See the [PDF import workflow](docs/SCORE_IMPORT.md) for setup and the
+[MusicXML guide](docs/MUSICXML.md) for supported notation and limits.
 
 Accessible Piano Learning Assistant: a Python hackathon prototype for blind and visually impaired learners.
 
@@ -26,9 +28,24 @@ uv run --extra camera --extra midi python -m ada_piano note-reader
 
 The MIDI reader, virtual keyboard, and audible-reference controls appear on the left;
 the hand-tracking camera preview appears on the right. Drag the divider to resize
-the panels. Select the MIDI input and click **Start camera**. Camera source `0`
-is the default; the editable source field also accepts `2`, `/dev/video2`, or
-other OpenCV-compatible strings. Stop before changing sources and restarting.
+the panels. Select the MIDI input, choose a **Camera source**, and click
+**Start camera**. To switch between the built-in and external camera while
+tracking, choose the other source in the dropdown. The app releases the previous
+camera before opening the selected one; MIDI input and playback keep running.
+**Stop camera** also cancels a pending switch.
+
+The source field is editable and defaults to `0`. You can also type `2`,
+`/dev/video2`, or another OpenCV-compatible string and click **Switch camera**
+(or **Start camera** when stopped).
+
+After plugging in a USB camera, click **Refresh cameras**. On Linux, the dropdown
+shows device names supplied by the operating system (with their camera numbers).
+On other systems, or when no devices are listed, it offers numbered camera
+choices. Camera 0 is often the built-in camera, but numbering and device type
+are not guaranteed: use the preview to identify each. Listed Linux devices may
+include additional endpoints that cannot capture video; select another source
+if opening one fails. Refreshing the list does not open cameras or interrupt
+the current stream. Refresh also preserves a manually entered source.
 
 The camera marks base knuckles in blue, middle joints in orange, and fingertips
 in green, with text labels and connected finger segments. The thumb's middle
@@ -85,7 +102,7 @@ For a local integration check (about 2 minutes):
 1. Start the camera and move your fingers; check the knuckle and fingertip markers.
 2. Play a piano key; check that the virtual keyboard updates alongside the video.
 3. Use **Audible reference** to play a short sequence; check that the preview continues.
-4. Stop and restart the camera; MIDI should remain connected.
+4. Select the external camera, then switch back; MIDI should remain connected.
 5. Close the window; confirm the camera is released and playback stops.
 
 Without a MIDI interface, add `--demo` to simulate input while testing the real
@@ -208,17 +225,23 @@ Typed callers can use `play_notes([PlaybackNote(...)], port_name=..., tempo=...)
 
 Playback uses a separate worker and monotonic deadlines. Its bounded event buffer includes actual send timestamps, releases, and `source="reference"`; `status` reports completion, cancellation, or failure. On output failure, cleanup attempts releases before closing the port; a disconnected cable cannot deliver those releases to the instrument. Stop/error handling does not depend on an AI response.
 
-MusicXML import is available for pitch/chord practice; its playback adapter and the AI adapter are not implemented yet. The playback API currently supports fixed-tempo note plans (including chords/rests), not raw MusicXML or score pedal/tempo-change instructions; importers should merge tied notes before submitting a plan. Future scoring should use distinct **Listen** and **Your turn** intervals so incoming echoes or playing during a demonstration are not treated as an assessed attempt.
+Reviewed MusicXML passages now feed the playback adapter and pitch/chord tutor
+from the **Scores** tab. References preserve chords, note durations, ties, and
+internal rests at the selected fixed tempo. Score tempo changes, pedal, dynamics,
+and fingering are not interpreted. Reference playback pauses practice; start a
+new attempt after listening. The approved passage is available as structured
+JSON for future agents; no language-model integration is enabled.
 
 ## Understand the modules
 
 | Module | What works now | Later |
 | --- | --- | --- |
 | `ada_piano/camera` | Generic OpenCV sources, capture check, threaded unmirrored MediaPipe preview, timestamped landmarks | Keyboard calibration and finger-to-key mapping |
-| `ada_piano/music_sheet` | JSON/MusicXML → timed attack groups, chords, rests; measure selection | Repeat playback; scanned score recognition is stretch work |
+| `ada_piano/music_sheet` | JSON/MusicXML → timed attack groups, chords, rests; measure selection | Repeat expansion and additional notation |
+| `ada_piano/score_import` | Local Audiveris conversion worker, saved outputs/logs, passage review, approval, tutor/agent context | Real Audiveris trial; notation editing and rendering |
 | `ada_piano/sound_sensor` | Simulated notes, real MIDI input, independent monitor | Optional microphone input and pitch estimation |
 | `ada_piano/note_reader` | Independent MIDI GUI, virtual keyboard, velocity/channel, sustain, simulated demo; live YPT-300 input confirmed | Accessibility validation |
-| `ada_piano/playback` | Audible reference GUI and reusable validated MIDI note-plan API, chords/rests, tempo, cancellation | MusicXML/AI adapters, score tempo changes and pedal phrasing |
+| `ada_piano/playback` | Audible reference GUI, reviewed-score adapter, validated MIDI note plans, fixed tempo, cancellation | AI adapter, score tempo changes and pedal phrasing |
 | `ada_piano/ai_tutor` | Single-note/chord practice, held-key matching, optional speech | Rhythm grading, hand-position context |
 
 Music Sheet supplies the expected notes. Sound sensor supplies played notes. Tutor compares them, advances only on a correct note, and sends text or speech feedback. Camera is deliberately tested separately before it contributes hand-position observations.

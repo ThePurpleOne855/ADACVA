@@ -36,6 +36,14 @@ may affect the excerpt. A range starting inside a repeat ending is rejected.
 Ranges cutting through a tie are rejected with instructions to extend the range.
 Selecting a range does not implement repeat playback or rhythm grading.
 
+The Scores GUI enables **Play written measures once** by default. This explicit
+practice mode reads repeat signs and alternate endings in written order, each
+selected measure once, without following repeats or skipping endings. Its title
+and saved review record identify the mode. The Python API exposes it as
+`load_exercise(path, written_order=True)`; the default API/CLI behavior remains
+strict. Playback jumps, pitch-changing features and other unsupported notation
+are still rejected in this mode.
+
 The importer provides **single-note and chord pitch practice**. Onsets, per-note
 durations and rests are preserved as exact fractions of quarter-note beats.
 Rests and durations are not graded. Tied continuations extend the original note
@@ -49,8 +57,9 @@ XML namespaces and compressed rootfile containers.
 Rejected: grace/cue/unpitched notes, microtones,
 repeats/endings/playback jumps, transposition, octave shifts, and timewise scores.
 Export an unfolded concert-pitch score without these features. This is not
-a complete MusicXML schema validator. PDF, photos and scanned scores require
-score recognition, which is not implemented.
+a complete MusicXML schema validator. PDFs can now be converted through the
+[Audiveris import/review workflow](SCORE_IMPORT.md). Direct photo import is not
+implemented. Recognition output must still pass these parser checks.
 
 XML is parsed locally without fetching external DTDs or extracting ZIP members
 to disk. Entity declarations and documents over 16 MiB are rejected.

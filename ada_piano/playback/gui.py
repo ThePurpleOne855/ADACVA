@@ -108,6 +108,19 @@ class PlaybackPanel(ttk.Frame):
         except ValueError as exc:
             self.status.set(str(exc))
 
+    def play_exercise(self, exercise):
+        from ada_piano.score_import.review import playback_notes
+        try:
+            if not self.output.get():
+                self.refresh()
+            tempo = float(self.tempo.get())
+            notes = playback_notes(exercise, tempo=tempo, velocity=int(self.velocity.get()), channel=int(self.channel.get()))
+            self.player.play_notes(notes, port_name=self.output.get(), tempo=tempo)
+            self._last_status = self.player.status
+            self.status.set(self._last_status.detail)
+        except Exception as exc:
+            self.status.set(f"Cannot play score: {exc}")
+
     def stop(self):
         self.player.stop()
 

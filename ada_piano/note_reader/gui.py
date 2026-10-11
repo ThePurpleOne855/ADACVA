@@ -10,6 +10,7 @@ from ada_piano.note_reader import NoteEvent, NoteReader
 from ada_piano.note_reader.keyboard import PianoKeyboard
 from ada_piano.playback.gui import PlaybackPanel
 from ada_piano.camera.gui import CameraPanel
+from ada_piano.score_import.gui import ScorePanel
 
 
 class NoteReaderWindow:
@@ -34,8 +35,10 @@ class NoteReaderWindow:
         self.held = tk.StringVar(value="Held keys: none")
         self.pedal = tk.StringVar(value="Sustain: off   |   Notes received: 0")
         self.activity = tk.StringVar(value="MIDI activity: disconnected")
-        panes = ttk.Panedwindow(root, orient="horizontal")
-        panes.pack(fill="both", expand=True)
+        self.workspace = ttk.Notebook(root)
+        self.workspace.pack(fill="both", expand=True)
+        panes = ttk.Panedwindow(self.workspace, orient="horizontal")
+        self.workspace.add(panes, text="Piano & Camera")
         frame = ttk.Frame(panes, padding=16)
         panes.add(frame, weight=3)
         self.camera = CameraPanel(panes, worker=camera_worker)
@@ -66,6 +69,8 @@ class NoteReaderWindow:
         self.tabs.add(log_frame, text="MIDI event log")
         self.playback = PlaybackPanel(self.tabs, player=player)
         self.tabs.add(self.playback, text="Audible reference")
+        self.score = ScorePanel(self.workspace, self.playback, connected=lambda: self.reader.connected and not self.demo)
+        self.workspace.add(self.score, text="Scores · import & practice")
         columns = ("time", "event", "note", "midi", "velocity", "channel", "duration", "source")
         self.log = ttk.Treeview(log_frame, columns=columns, show="headings", height=4)
         for column, title in zip(columns, ("Elapsed (s)", "Event", "Note", "MIDI", "Velocity", "Channel", "Duration (s)", "Source")):
@@ -78,6 +83,7 @@ class NoteReaderWindow:
         ttk.Label(frame, text="Keyboard MIDI OUT → cable MIDI IN → computer USB.\n"
                   "Duration measures press to release on OFF rows; sustain is shown separately. MIDI carries notes, not audio.",
                   wraplength=840).pack(anchor="w", pady=(12, 0))
+        ttk.Label(frame, textvariable=self.score.feedback, wraplength=840).pack(anchor="w", pady=4)
         self._started = monotonic()
         self.selector.focus_set()
         if demo:
@@ -109,7 +115,7 @@ class NoteReaderWindow:
                 self.activity.set(f"MIDI messages: {count} · Last: {last} · No key presses received. "
                                   "Check piano MIDI OUT → cable IN and Yamaha PC mode = OFF (PC1 disables notes).")
             elif count:
-                seconds = monotonic() - self.reader.last_received
+                seconds = monotonic() - (self.reader.last_received or monotonic())
                 self.activity.set(f"MIDI messages: {count} · Last: {last} · Received {seconds:.1f}s ago")
             else:
                 self.activity.set("Input is open. Waiting for piano data — play a key.")
@@ -121,6 +127,7 @@ class NoteReaderWindow:
         return [port for port in ports if "midi through" not in port.lower()]
 
     def _error(self, exc):
+        self.score.stop_practice()
         self.demo = False
         try:
             self.reader.disconnect()
@@ -161,6 +168,7 @@ class NoteReaderWindow:
             self._error(exc)
 
     def disconnect(self):
+        self.score.stop_practice()
         self.demo = False
         self.playback.stop()
         try:
@@ -203,6 +211,7 @@ class NoteReaderWindow:
         self.playback.play_note(pitch)
 
     def _record(self, event, source="Piano"):
+        self.score.observe(event, source)
         if event.kind == "on" and source != "Reference":
             self._last_played = event.note
         if source != "Reference":
@@ -248,15 +257,18 @@ class NoteReaderWindow:
         if self._timer is not None:
             self.root.after_cancel(self._timer)
         try:
-            self.camera.close()
+            self.score.close()
         finally:
             try:
-                self.playback.player.close()
+                self.camera.close()
             finally:
                 try:
-                    self.reader.disconnect()
+                    self.playback.player.close()
                 finally:
-                    self.root.destroy()
+                    try:
+                        self.reader.disconnect()
+                    finally:
+                        self.root.destroy()
 
 
 def launch(demo=False):

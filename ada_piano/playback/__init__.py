@@ -164,7 +164,7 @@ class ReferencePlayer:
             raise ValueError("Each note needs a note number and only supported note fields.") from exc
         self.play_notes(notes, port_name=port_name, tempo=request.get("tempo", 90))
 
-    def play_notes(self, notes, *, port_name: str, tempo=90):
+    def play_notes(self, notes, *, port_name: str, tempo: float = 90):
         notes = validate_notes(notes, tempo)
         if not isinstance(port_name, str) or not port_name.strip():
             raise ValueError("Select a MIDI output first.")
