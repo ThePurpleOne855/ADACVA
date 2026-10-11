@@ -10,6 +10,7 @@ from ada_piano.music_sheet import note_name
 from ada_piano.sound_sensor import NoteEvent
 from .conversion import ScoreImporter, score_parts
 from .review import ReviewedScore
+from ada_piano.agent.attempts import AttemptRecorder
 
 
 class ScorePanel(ttk.Frame):
@@ -21,6 +22,9 @@ class ScorePanel(ttk.Frame):
         self.review = None
         self.loaded = None
         self.tutor = None
+        self.attempt = None
+        self.latest_attempt = None
+        self.activity_version = 0
         self._closed = False
         self._handled = None
         self._outputs = {}
@@ -115,6 +119,8 @@ class ScorePanel(ttk.Frame):
         self._timer = self.after(150, self._poll)
 
     def _invalidate(self, *args):
+        self.activity_version += 1
+        self.stop_practice()
         if self.loaded is not None:
             self.playback.stop()
         self.review = self.loaded = self.tutor = None
@@ -129,6 +135,7 @@ class ScorePanel(ttk.Frame):
 
     def _confirmation_changed(self):
         if not self.confirmed.get():
+            self.stop_practice()
             self.loaded = self.tutor = None
             self.playback.stop()
             self.play_button.configure(state="disabled")
@@ -273,6 +280,7 @@ class ScorePanel(ttk.Frame):
             self.status.set(f"Cannot load: {exc}")
 
     def play(self):
+        self.activity_version += 1
         if self.loaded is None:
             return
         self.stop_practice()
@@ -280,7 +288,8 @@ class ScorePanel(ttk.Frame):
         self._following_playback = self.playback.player.status.state == "playing"
         self.feedback.set(self.playback.status.get())
 
-    def practice(self):
+    def practice(self, exercise=None, context=None):
+        self.activity_version += 1
         if self.loaded is None:
             return
         if not self.connected():
@@ -289,16 +298,24 @@ class ScorePanel(ttk.Frame):
         if self.playback.player.status.state == "playing":
             self.feedback.set("Wait for the reference to finish or stop its sound before practicing.")
             return
-        self.tutor = Tutor(self.loaded.exercise)
+        self.stop_practice()
+        self.tutor = Tutor(exercise if exercise is not None else self.loaded.exercise)
+        self.attempt = AttemptRecorder(context if context is not None else self.loaded.context())
         self._following_playback = False
         self.feedback.set("Your turn. Release held keys first. " + self.tutor.prompt())
 
     def stop_practice(self):
+        self.activity_version += 1
+        if self.attempt is not None:
+            self.attempt.finish()
+            self.latest_attempt = self.attempt
+            self.attempt = None
         if self.tutor is not None:
             self.feedback.set("Practice stopped. Start a new attempt when ready.")
         self.tutor = None
 
     def stop(self):
+        self.activity_version += 1
         self._following_playback = False
         self.stop_practice()
         self.playback.stop()
@@ -311,11 +328,14 @@ class ScorePanel(ttk.Frame):
             self.stop_practice()
             self.feedback.set("Reference playing. Start practice again when it finishes.")
             return
-        message = self.tutor.observe(NoteEvent(event.note, event.velocity, event.timestamp, "midi",
+        result = self.tutor.evaluate(NoteEvent(event.note, event.velocity, event.timestamp, "midi",
                                               "note_on" if event.kind == "on" else "note_off", event.channel - 1))
-        if message:
-            self.feedback.set(message)
+        if result:
+            self.feedback.set(result.message)
+            self.attempt.record(result)
         if self.tutor.complete:
+            self.latest_attempt = self.attempt
+            self.attempt = None
             self.tutor = None
 
     def agent_context(self):
@@ -368,6 +388,7 @@ class ScorePanel(ttk.Frame):
                 self._timer = self.after(150, self._poll)
 
     def close(self):
+        self.stop_practice()
         self._closed = True
         self.after_cancel(self._timer)
         self.importer.close()

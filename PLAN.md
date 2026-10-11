@@ -8,6 +8,30 @@ Live YPT-300 input through the mioXC is user-confirmed. Note Reader displays a v
 
 Music Sheet loads JSON and MusicXML (including compressed MXL), preserving timed attack groups, chords, rests, and ties with part/staff/voice and measure selection. The tutor supports held-key chord matching, but does not grade rhythm. The shared GUI tracks finger joints with camera selection, but the camera is not calibrated to piano keys or integrated with the tutor. The Scores tab now provides a local Audiveris conversion worker, retained sources/results/logs, passage review and approval, fixed-tempo MusicXML playback, and live pitch/chord practice. Audiveris recognition and the new desktop workflow still need local validation. Saved practice sessions, language-model feedback, and calibrated hand guidance remain to be implemented.
 
+## ADA Coach update — 2026-10-11
+
+First lightweight coaching layer: immutable TutorResult observations preserve
+the legacy text API; in-memory AttemptRecorder tracks approved-score identity,
+selection, monotonic timestamps, completion and feedback. Deterministic summaries
+group repeated errors and measured chord spreads. Optional JSON export is run
+off the UI thread. This deliberately uses one attempt.json, rather than the
+future multi-sensor events.jsonl recorder described below.
+
+The optional Responses client sends sanitized approved score context and attempt
+summaries, never raw sensors. Five bounded tools read passage/summary, request
+reference playback, start targeted practice and stop. Playback uses the existing
+ReferencePlayer and safety limits. Application confirmation and spoken
+announcement precede reference sound; targeted practice waits for completion.
+The combined Tkinter window has an ADA Coach tab; requests and system TTS run
+in background workers, with text fallback and cancellation. No database,
+microphone, camera calibration or full rhythm grading is included.
+
+Remaining: physical Yamaha/speech and live API validation, accessibility testing
+with learners, independently timestamped MIDI capture, timed comparison,
+cross-attempt improvement analysis and the richer multi-sensor session recorder.
+Existing historical stage descriptions below are the broader roadmap, not a
+claim that those stages have all been delivered.
+
 ## Implementation stages
 
 Initial engineering estimates below assume sample scores and dependencies are available. Recognition corrections and learner testing may add time.

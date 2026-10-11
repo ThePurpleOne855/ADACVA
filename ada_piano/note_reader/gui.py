@@ -11,10 +11,12 @@ from ada_piano.note_reader.keyboard import PianoKeyboard
 from ada_piano.playback.gui import PlaybackPanel
 from ada_piano.camera.gui import CameraPanel
 from ada_piano.score_import.gui import ScorePanel
+from ada_piano.agent.gui import CoachPanel
 
 
 class NoteReaderWindow:
-    def __init__(self, root: tk.Tk, reader=None, demo=False, player=None, camera_worker=None):
+    def __init__(self, root: tk.Tk, reader=None, demo=False, player=None, camera_worker=None,
+                 agent_client=None, voice=None):
         self.root = root
         self.reader = reader if reader is not None else NoteReader()
         self.demo = False
@@ -71,6 +73,8 @@ class NoteReaderWindow:
         self.tabs.add(self.playback, text="Audible reference")
         self.score = ScorePanel(self.workspace, self.playback, connected=lambda: self.reader.connected and not self.demo)
         self.workspace.add(self.score, text="Scores · import & practice")
+        self.coach = CoachPanel(self.workspace, self.score, client=agent_client, voice=voice)
+        self.workspace.add(self.coach, text="ADA Coach")
         columns = ("time", "event", "note", "midi", "velocity", "channel", "duration", "source")
         self.log = ttk.Treeview(log_frame, columns=columns, show="headings", height=4)
         for column, title in zip(columns, ("Elapsed (s)", "Event", "Note", "MIDI", "Velocity", "Channel", "Duration (s)", "Source")):
@@ -257,7 +261,10 @@ class NoteReaderWindow:
         if self._timer is not None:
             self.root.after_cancel(self._timer)
         try:
-            self.score.close()
+            try:
+                self.coach.close()
+            finally:
+                self.score.close()
         finally:
             try:
                 self.camera.close()
