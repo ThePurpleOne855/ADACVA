@@ -34,6 +34,10 @@ tracking, choose the other source in the dropdown. The app releases the previous
 camera before opening the selected one; MIDI input and playback keep running.
 **Stop camera** also cancels a pending switch.
 
+The source field is editable and defaults to `0`. You can also type `2`,
+`/dev/video2`, or another OpenCV-compatible string and click **Switch camera**
+(or **Start camera** when stopped).
+
 After plugging in a USB camera, click **Refresh cameras**. On Linux, the dropdown
 shows device names supplied by the operating system (with their camera numbers).
 On other systems, or when no devices are listed, it offers numbered camera
@@ -41,7 +45,7 @@ choices. Camera 0 is often the built-in camera, but numbering and device type
 are not guaranteed: use the preview to identify each. Listed Linux devices may
 include additional endpoints that cannot capture video; select another source
 if opening one fails. Refreshing the list does not open cameras or interrupt
-the current stream.
+the current stream. Refresh also preserves a manually entered source.
 
 The camera marks base knuckles in blue, middle joints in orange, and fingertips
 in green, with text labels and connected finger segments. The thumb's middle
@@ -51,6 +55,47 @@ running. Closing the window stops camera capture and MIDI playback. Camera
 capture and inference run in a background thread, retaining only the latest
 preview so a slow camera does not block the MIDI controls. A camera failure is
 shown in its panel without disconnecting the piano.
+
+Inference and preview are unmirrored, preserving the camera's left-to-right
+view (mount it so physical low notes appear on the left). Each processed
+`CameraFrame` retains `captured_at_ns`, sampled from `time.monotonic_ns()`
+immediately after `read()`, plus immutable normalized `hand_landmarks` (x/y/z)
+in that same unmirrored image coordinate system. Divide nanoseconds by 1e9 to
+compare with MIDI's monotonic seconds. This is host acquisition time, not the
+sensor's exposure time; driver/phone buffering can add latency. MediaPipe uses
+a separate strictly increasing millisecond timestamp derived from acquisition
+time. Camera observations are not proof of a key press: MIDI remains authoritative
+for actual note events. No keyboard calibration or fingering grading is added.
+
+### Using an iPhone as the camera
+
+ADACVA does not communicate directly with iOS. First expose the iPhone to the
+operating system as a webcam, for example through DroidCam/V4L2 on Linux.
+ADACVA then opens the resulting `/dev/videoN` source through OpenCV; it does
+not implement DroidCam, WebRTC, RTSP servers, or custom phone networking.
+
+Find the device and run the existing capture-only check:
+
+```sh
+v4l2-ctl --list-devices
+uv run --extra camera python -m ada_piano camera --source /dev/video2 --seconds 10 --preview
+```
+
+For MediaPipe tracking, run the combined window and enter `/dev/video2` in
+**Camera source**, then click **Start camera**:
+
+```sh
+uv run --extra camera --extra midi python -m ada_piano note-reader
+```
+
+Integer sources still work: `camera --source 0` is the default, and `--index 0`
+remains a compatibility alias. Do not combine `--index` and `--source`.
+OpenCV-compatible string/URL sources can also be entered, but their actual
+support depends on the installed OpenCV backend. The iPhone's ultrawide camera,
+if available through the webcam software, may help fit the full Yamaha YPT-300
+keyboard. Phone/device permissions, lens selection, latency, field of view and
+left-to-right orientation need physical validation. Camera geometry and key
+calibration are future work; landmarks do not establish which key was pressed.
 
 For a local integration check (about 2 minutes):
 
@@ -191,7 +236,7 @@ JSON for future agents; no language-model integration is enabled.
 
 | Module | What works now | Later |
 | --- | --- | --- |
-| `ada_piano/camera` | Independent timed webcam capture check, optional preview | MediaPipe hand landmarks, keyboard calibration |
+| `ada_piano/camera` | Generic OpenCV sources, capture check, threaded unmirrored MediaPipe preview, timestamped landmarks | Keyboard calibration and finger-to-key mapping |
 | `ada_piano/music_sheet` | JSON/MusicXML → timed attack groups, chords, rests; measure selection | Repeat expansion and additional notation |
 | `ada_piano/score_import` | Local Audiveris conversion worker, saved outputs/logs, passage review, approval, tutor/agent context | Real Audiveris trial; notation editing and rendering |
 | `ada_piano/sound_sensor` | Simulated notes, real MIDI input, independent monitor | Optional microphone input and pitch estimation |
@@ -213,7 +258,7 @@ uv run --extra midi python -m ada_piano midi-monitor --port "EXACT INPUT NAME"
 uv run --extra hardware python -m ada_piano practice --port "EXACT INPUT NAME" --speak
 ```
 
-The camera command prints its result without requiring a visual window. Add `--preview` for a sighted setup helper; use `--index 1` for another webcam. Press Control C to stop monitoring or practice. CLI text works with a terminal screen reader; screen-reader usability still needs testing with a learner.
+The camera command prints its result without requiring a visual window. Add `--preview` for a sighted setup helper; use `--source 1` (or legacy `--index 1`) for another webcam. Press Control C to stop monitoring or practice. CLI text works with a terminal screen reader; screen-reader usability still needs testing with a learner.
 
 ## Connect the Yamaha YPT-300
 

@@ -1,25 +1,28 @@
-"""Independent webcam check; hand landmarks and key calibration come next."""
+"""Independent capture-only check; hand tracking runs in the camera panel."""
 
 from time import monotonic
 
+from ada_piano.camera.source import CameraSource, parse_camera_source
 
-def check_camera(index: int = 0, seconds: float = 5, preview: bool = False) -> int:
+
+def check_camera(source: CameraSource = 0, seconds: float = 5, preview: bool = False) -> int:
     if seconds <= 0:
         raise ValueError("Camera duration must be greater than zero.")
+    source = parse_camera_source(source)
     try:
         import cv2
     except ImportError as exc:
         raise RuntimeError('Camera dependencies missing. Run: uv sync --extra camera') from exc
-    camera = cv2.VideoCapture(index)
+    camera = cv2.VideoCapture(source)
     count = 0
     try:
         if not camera.isOpened():
-            raise RuntimeError(f"Cannot open camera {index}. Check permissions, connection, or --index.")
+            raise RuntimeError(f"Cannot open camera source {source}. Check permissions, connection, or --source.")
         deadline = monotonic() + seconds
         while monotonic() < deadline:
             ok, frame = camera.read()
             if not ok:
-                raise RuntimeError("Camera opened but a frame could not be read.")
+                raise RuntimeError(f"Camera source {source} opened but a frame could not be read.")
             count += 1
             if preview:
                 cv2.imshow("ADA camera check - Q to close", frame)

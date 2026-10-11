@@ -30,6 +30,17 @@ class DelayedWorker:
 
 
 class CameraSelectionTests(unittest.TestCase):
+    def test_switch_to_generic_source_waits_for_release(self):
+        worker = DelayedWorker()
+        controller = CameraController(worker)
+        controller.start("0")
+        controller.start("/dev/video2")
+        self.assertEqual(worker.started, [0])
+        self.assertIn("/dev/video2", controller.snapshot()[1])
+        worker.running = False
+        controller.snapshot()
+        self.assertEqual(worker.started, [0, "/dev/video2"])
+
     def test_switch_waits_for_release_and_keeps_latest_selection(self):
         worker = DelayedWorker()
         controller = CameraController(worker)

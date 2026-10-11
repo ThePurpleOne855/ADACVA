@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ada_piano.camera.stream import CameraWorker
+from ada_piano.camera.source import parse_camera_source
 from ada_piano.camera.controller import CameraController
 from ada_piano.camera.devices import camera_choices
 
@@ -16,11 +17,13 @@ class CameraPanel(ttk.LabelFrame):
         self._photo = None
         self._closed = False
         self._notice = None
-        self.selection = tk.StringVar()
+        self.source = tk.StringVar(value="0")
+        self.selection = self.source
         self._choices = {}
         self.status = tk.StringVar(value="Camera off. MIDI works independently.")
         ttk.Label(self, text="Camera source:").pack(anchor="w")
-        self.selector = ttk.Combobox(self, textvariable=self.selection, state="readonly")
+        self.selector = ttk.Combobox(self, textvariable=self.selection)
+        self.source_field = self.selector
         self.selector.pack(fill="x", pady=(4, 8))
         self.selector.bind("<<ComboboxSelected>>", self._selected)
         controls = ttk.Frame(self)
@@ -34,17 +37,21 @@ class CameraPanel(ttk.LabelFrame):
         ttk.Label(self, textvariable=self.status, wraplength=410).pack(anchor="w")
         ttk.Label(self, text="Blue: base knuckles · Orange: middle joints\n"
                   "Green: fingertips · White: finger segments\n"
-                  "Preview is mirrored. Tracking does not grade fingering.",
+                  "Preview is unmirrored. Tracking does not grade fingering.",
                   wraplength=410).pack(anchor="w", pady=(8, 0))
         self.refresh()
         self._timer = self.after(50, self._tick)
 
     def refresh(self):
-        previous = self._choices.get(self.selection.get())
+        text = self.selection.get()
+        previous = self._choices.get(text)
         self._choices = camera_choices()
         self.selector["values"] = tuple(self._choices)
-        self.selection.set(next((label for label, index in self._choices.items() if index == previous),
-                                next(iter(self._choices))))
+        if previous is not None:
+            self.selection.set(next((label for label, source in self._choices.items() if source == previous),
+                                    str(previous)))
+        else:
+            self.selection.set(text or "0")
 
     def _selected(self, event=None):
         if self.worker.running or self.controller.pending is not None:
@@ -52,17 +59,16 @@ class CameraPanel(ttk.LabelFrame):
 
     def start(self):
         try:
-            index = self._choices.get(self.selection.get())
-            if index is None:
-                raise ValueError("Select a camera first.")
-            self.controller.start(index)
+            text = self.source.get()
+            source = parse_camera_source(self._choices.get(text, text))
+            self.controller.start(source)
         except Exception as exc:
             self._notice = f"Camera error: {exc}"
             self.status.set(self._notice)
             return
         self._notice = None
         self._clear_preview()
-        self.status.set(f"Starting camera {index}…")
+        self.status.set(f"Starting camera source {source}…")
 
     def stop(self):
         self._notice = None
