@@ -100,6 +100,7 @@ class NoteReaderWindow:
             root.bind(key, lambda event, action=action: action() or "break")
         if accessible:
             self.coach.use_best_voice()
+            self.coach.conversation = True
             self.coach.speak.set(True)
             self.workspace.select(self.coach)
             self.coach.entry.focus_set()
