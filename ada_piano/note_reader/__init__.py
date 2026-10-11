@@ -17,6 +17,7 @@ class NoteEvent:
     velocity: int
     channel: int
     timestamp: float
+    duration: float | None = None
 
     @property
     def name(self) -> str:
@@ -28,11 +29,13 @@ class NoteState:
         self.held: dict[tuple[int, int], int] = {}
         self.sustain: set[int] = set()
         self.note_count = 0
+        self._pressed_at: dict[tuple[int, int], float] = {}
 
     def reset(self):
         self.held.clear()
         self.sustain.clear()
         self.note_count = 0
+        self._pressed_at.clear()
 
     def consume(self, message) -> NoteEvent | None:
         if message.type == "reset":
@@ -46,19 +49,27 @@ class NoteState:
                     self.sustain.discard(channel)
             elif message.control in (120, 123):
                 self.held = {key: value for key, value in self.held.items() if key[0] != channel}
+                self._pressed_at = {key: value for key, value in self._pressed_at.items() if key[0] != channel}
             elif message.control == 121:
                 self.sustain.discard(channel)
         elif message.type in ("note_on", "note_off"):
             channel = message.channel + 1
             pressed = message.type == "note_on" and message.velocity > 0
             key = (channel, message.note)
+            timestamp = monotonic()
+            duration = None
             if pressed:
                 self.held[key] = message.velocity
+                # A repeated press on the same pitch/channel starts a new timer.
+                self._pressed_at[key] = timestamp
                 self.note_count += 1
             else:
                 self.held.pop(key, None)
+                started = self._pressed_at.pop(key, None)
+                if started is not None:
+                    duration = timestamp - started
             return NoteEvent("on" if pressed else "off", message.note,
-                             message.velocity, channel, monotonic())
+                             message.velocity, channel, timestamp, duration)
         return None
 
 

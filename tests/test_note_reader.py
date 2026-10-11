@@ -1,6 +1,7 @@
 from collections import deque
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from ada_piano.note_reader import NoteReader, NoteState
 
@@ -48,6 +49,47 @@ class FakeBackend:
 
 
 class NoteStateTests(unittest.TestCase):
+    def test_duration_pairs_notes_and_channels_with_both_release_formats(self):
+        state = NoteState()
+        with patch("ada_piano.note_reader.monotonic", side_effect=[10, 10.25, 10.5, 11, 12, 13]):
+            self.assertIsNone(state.consume(note()).duration)
+            state.consume(note(number=64))
+            state.consume(note(channel=1))
+            self.assertEqual(state.consume(note("note_off")).duration, 1)
+            self.assertEqual(state.consume(note(number=64, velocity=0)).duration, 1.75)
+            self.assertEqual(state.consume(note("note_off", channel=1)).duration, 2.5)
+
+    def test_duration_ends_at_release_even_with_sustain(self):
+        state = NoteState()
+        state.consume(control(64, 127))
+        with patch("ada_piano.note_reader.monotonic", side_effect=[0, 0.5]):
+            state.consume(note())
+            self.assertEqual(state.consume(note("note_off")).duration, 0.5)
+        self.assertEqual(state.sustain, {1})
+
+    def test_duration_is_unknown_after_reset_or_unmatched_release(self):
+        state = NoteState()
+        self.assertIsNone(state.consume(note("note_off")).duration)
+        for reset in (SimpleNamespace(type="reset"), control(120), control(123)):
+            with self.subTest(reset=reset):
+                state.consume(note())
+                state.consume(note(channel=1))
+                state.consume(reset)
+                self.assertIsNone(state.consume(note("note_off")).duration)
+                other = state.consume(note("note_off", channel=1))
+                if reset.type != "reset":
+                    self.assertIsNotNone(other.duration)
+        state.consume(note())
+        state.reset()
+        self.assertIsNone(state.consume(note("note_off")).duration)
+
+    def test_repeated_press_restarts_duration(self):
+        state = NoteState()
+        with patch("ada_piano.note_reader.monotonic", side_effect=[1, 2, 2.75]):
+            state.consume(note())
+            state.consume(note())
+            self.assertEqual(state.consume(note("note_off")).duration, 0.75)
+
     def test_chord_and_both_release_encodings(self):
         state = NoteState()
         for number in (60, 64, 67):

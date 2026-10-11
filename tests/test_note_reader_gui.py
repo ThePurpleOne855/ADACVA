@@ -1,9 +1,12 @@
 """Desktop smoke tests; skipped when Tk or a display is unavailable."""
 
 import unittest
+from unittest.mock import patch
 
 from ada_piano.note_reader import NoteReader
 from test_note_reader import FakeBackend, note, control
+from ada_piano.playback import ReferencePlayer
+from test_playback import FakeOutputBackend, message
 
 try:
     import tkinter as tk
@@ -22,7 +25,9 @@ class NoteReaderGuiTests(unittest.TestCase):
         self.root.withdraw()
         self.backend = FakeBackend()
         self.reader = NoteReader(self.backend)
-        self.window = NoteReaderWindow(self.root, reader=self.reader)
+        self.output_backend = FakeOutputBackend()
+        self.player = ReferencePlayer(self.output_backend, message_factory=message)
+        self.window = NoteReaderWindow(self.root, reader=self.reader, player=self.player)
         # Withdrawn test windows do not receive the canvas Configure event.
         self.window.keyboard._draw()
         self.addCleanup(self.window.close)
@@ -44,6 +49,81 @@ class NoteReaderGuiTests(unittest.TestCase):
         self.assertEqual(self.window.held.get(), "Held keys: none")
         self.assertTrue(self.backend.ports[-1].closed)
         self.assertFalse(self.window.keyboard.active)
+
+    def test_reference_controls_send_notes_without_counting_them_as_input(self):
+        panel = self.window.playback
+        panel.tempo.set("300")
+        panel.beats.set("0.1")
+        panel.sequence.set("C4 D4 E4")
+        panel.play_sequence()
+        self.run_gui(200)
+        self.assertEqual(self.player.status.state, "finished")
+        self.assertEqual(self.reader.state.note_count, 0)
+        rows = self.window.log.get_children()
+        self.assertEqual(len(rows), 6)
+        self.assertTrue(all(self.window.log.set(row, "source") == "Reference" for row in rows))
+        self.assertFalse(panel.active)
+
+    def test_reference_highlight_and_stop(self):
+        self.window._play_key(61)
+        self.run_gui(100)
+        keyboard = self.window.keyboard
+        self.assertIn(61, keyboard.reference)
+        self.assertEqual(keyboard.itemcget(keyboard.key_items[61], "fill"), keyboard.REFERENCE)
+        self.assertEqual(self.reader.state.note_count, 0)
+        self.window.playback.stop()
+        self.run_gui(100)
+        self.assertFalse(keyboard.reference)
+        self.assertEqual(self.player.status.state, "stopped")
+
+    def test_bad_reference_input_does_not_open_output(self):
+        panel = self.window.playback
+        panel.sequence.set("C4 not-a-note")
+        panel.play_sequence()
+        self.assertEqual(self.output_backend.opens, 0)
+        self.assertIn("Invalid note", panel.status.get())
+        panel.pitch.set("C4")
+        panel.beats.set("nan")
+        panel.play_note()
+        self.assertEqual(self.output_backend.opens, 0)
+
+    def test_reference_does_not_auto_select_software_loopback(self):
+        panel = self.window.playback
+        self.output_backend.names = ["Midi Through:Midi Through Port-0 14:0", "RtMidiIn Client:RtMidi input 128:0"]
+        panel.refresh()
+        self.assertEqual(panel.output.get(), "")
+        self.assertIn("Only software outputs", panel.status.get())
+
+    def test_canvas_click_on_black_key_plays_black_key(self):
+        from types import SimpleNamespace
+        keyboard = self.window.keyboard
+        # Draw at a practical size even though the window remains hidden.
+        with patch.object(keyboard, "winfo_width", return_value=1000):
+            keyboard._draw()
+        x1, y1, x2, y2 = keyboard.coords(keyboard.key_items[61])
+        keyboard._click(SimpleNamespace(x=(x1 + x2) / 2, y=(y1 + y2) / 2))
+        self.run_gui(100)
+        sent = [m.note for m in self.output_backend.port.messages if m.type == "note_on"]
+        self.assertEqual(sent, [61])
+
+    def test_duration_column_on_release_and_after_clearing_log(self):
+        with patch("ada_piano.note_reader.monotonic", side_effect=[10, 11.375]):
+            self.window._record(self.reader.state.consume(note()))
+            row = self.window.log.get_children()[-1]
+            self.assertEqual(self.window.log.set(row, "duration"), "—")
+            self.window.clear_log()
+            self.window._record(self.reader.state.consume(note(velocity=0)))
+        row = self.window.log.get_children()[-1]
+        self.assertEqual(self.window.log.set(row, "duration"), "1.375")
+        self.assertEqual(self.window.log.set(row, "event"), "OFF")
+
+    def test_disconnect_discards_unfinished_duration(self):
+        self.window._record(self.reader.state.consume(note()))
+        self.window.disconnect()
+        self.window.connect()
+        self.window._record(self.reader.state.consume(note("note_off")))
+        row = self.window.log.get_children()[-1]
+        self.assertEqual(self.window.log.set(row, "duration"), "—")
 
     def test_demo_switch_cleans_live_port(self):
         self.window.connect()

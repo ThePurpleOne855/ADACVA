@@ -66,7 +66,9 @@ uv run python -m ada_piano note-reader --demo
 
 Demo simulates a C4–E4–G4 chord, both release formats, and sustain. It does not play audio or verify your cable. **Clear log** clears event history only; reconnecting or restarting Demo resets the session count. The window uses Tkinter; on Arch Linux, install `tk` if Tkinter is missing (`sudo pacman -S tk`). A graphical desktop is required. If Linux reports that the ALSA sequencer is unavailable, verify that `/dev/snd/seq` exists on the host and that the app has device access; containers may not expose MIDI devices.
 
-The reusable `ada_piano.note_reader.NoteReader` uses Mido's explicit RtMidi backend and nonblocking polling. It is independent of the existing tutor and sound sensor API. All 24 automated tests passed, including desktop GUI tests; a separate virtual-port test verified real RtMidi events reaching the virtual keyboard. Live input from the YPT-300 through the mioXC was confirmed by the user on 2026-10-10. Screen-reader usability still requires testing with a learner.
+The **Duration (s)** column shows how long each key was held on its **OFF** row, to three decimal places. Timing is tracked separately per note and MIDI channel, from press to release, and does not include sustain-pedal time. ON rows and releases without a recorded press show `—`. Clearing the log preserves timing for held keys; disconnecting or resetting clears it. A repeated press on the same note/channel restarts its timer. Measurements use the app's monotonic clock and are approximate at the GUI's 20 ms polling interval.
+
+The reusable `ada_piano.note_reader.NoteReader` uses Mido's explicit RtMidi backend and nonblocking polling. It is independent of the existing tutor and sound sensor API. Automated tests cover MIDI state and desktop GUI behavior; a separate virtual-port test verified real RtMidi events reaching the virtual keyboard. Live input from the YPT-300 through the mioXC was confirmed by the user on 2026-10-10. Screen-reader usability still requires testing with a learner.
 
 ### Connected but no keys light up
 
@@ -76,6 +78,47 @@ The **MIDI activity** line distinguishes an open USB interface from received not
 2. On the YPT-300, set **PC mode to OFF** and **Local Control ON** if you want to hear the piano's own speakers. **PC1 disables Keyboard Out**; PC mode OFF enables it. PC2 also enables Keyboard Out but disables local sound. Local sound alone does not prove MIDI transmission. See the [Yamaha manual, pages 59–60](https://data.yamaha.com/download/files/2091886).
 3. Play several keys and watch the message count. If it stays at zero, the app has not received MIDI data: check the cable, piano power, and PC mode. **Demo** tests the visual keyboard independently of that connection.
 
+### Audible reference (1 minute)
+
+1. Keep USB connected. Connect **mioXC MIDI OUT → Yamaha MIDI IN** and make the Yamaha speaker volume audible. The opposite cable direction is used for reading your playing.
+2. Open the **Audible reference** tab in Note Reader. Choose the mioXC under **MIDI output** (use **Refresh outputs** after reconnecting).
+3. Enter `C4` and click **Play note**, or click a key on the virtual keyboard. Notes also accept MIDI numbers such as `60`, sharps (`F#4`), and flats (`Bb3`). Each click plays one note for the selected beat duration; stop the current reference before starting another.
+4. Enter a space- or comma-separated sequence such as `C4 D4 E4 F4 G4` and click **Play sequence**. Adjust tempo, beats per note, velocity, and MIDI channel as needed.
+5. Use **Stop sound** to interrupt playback. Closing the window or choosing **Disconnect / Stop** also stops the output worker and releases playback notes.
+
+Blue-filled keys are reference notes; green keys are notes received from your keyboard. Outgoing reference events appear in the log with **Source = Reference** and do not directly update the input note count. Real input continues to be read and is never automatically echoed to output. The offline **Demo** remains simulated; use the reference controls for actual sound. The engine selects General MIDI program 0 (piano) and turns sustain off on the chosen channels for reference playback. A completion message confirms MIDI was sent, not that speakers produced audible sound.
+
+### Reusable playback API for AI and score modules
+
+`ada_piano.playback.ReferencePlayer` runs without Tkinter and accepts a validated, JSON-compatible request. A future AI adapter can choose a reviewed passage and submit its note plan; the application supplies the output port. Example:
+
+```python
+from ada_piano.playback import ReferencePlayer
+
+player = ReferencePlayer()
+print(player.list_ports())  # Select the exact Yamaha interface output.
+player.play_request(
+    {
+        "tempo": 90,
+        "notes": [
+            {"note": 60, "start_beat": 0, "duration_beats": 1},
+            {"note": 64, "start_beat": 1, "duration_beats": 1},
+            {"note": 67, "start_beat": 2, "duration_beats": 2},
+        ],
+    },
+    port_name="EXACT OUTPUT NAME",
+)
+# Returns immediately. Keep your application running while the worker plays.
+# Read player.status and drain_events() from your UI/controller loop.
+# player.stop() cancels; player.close() releases resources on application exit.
+```
+
+Typed callers can use `play_notes([PlaybackNote(...)], port_name=..., tempo=...)`. `start_beat` and `duration_beats` use quarter-note beats; equal starts create chords, gaps create rests. Channels are 1–16 and default to 1; velocity defaults to 70. Requests allow only note plans and tempo, not arbitrary MIDI/SysEx. Validation rejects invalid pitches, nonfinite timing, overlapping identical pitch/channel pairs, more than 4096 notes, or references longer than five minutes. Tempo is 20–300 BPM. A second request during playback is rejected until the first stops or finishes.
+
+Playback uses a separate worker and monotonic deadlines. Its bounded event buffer includes actual send timestamps, releases, and `source="reference"`; `status` reports completion, cancellation, or failure. On output failure, cleanup attempts releases before closing the port; a disconnected cable cannot deliver those releases to the instrument. Stop/error handling does not depend on an AI response.
+
+The score importer and AI adapter are not implemented yet. The playback API currently supports fixed-tempo note plans (including chords/rests), not raw MusicXML or score pedal/tempo-change instructions; importers should merge tied notes before submitting a plan. Future scoring should use distinct **Listen** and **Your turn** intervals so incoming echoes or playing during a demonstration are not treated as an assessed attempt.
+
 ## Understand the modules
 
 | Module | What works now | Later |
@@ -84,6 +127,7 @@ The **MIDI activity** line distinguishes an open USB interface from received not
 | `ada_piano/music_sheet` | Validated JSON exercise → ordered MIDI notes | MusicXML import; scanned score recognition is stretch work |
 | `ada_piano/sound_sensor` | Simulated notes, real MIDI input, independent monitor | Optional microphone input and pitch estimation |
 | `ada_piano/note_reader` | Independent MIDI GUI, virtual keyboard, velocity/channel, sustain, simulated demo; live YPT-300 input confirmed | Accessibility validation |
+| `ada_piano/playback` | Audible reference GUI and reusable validated MIDI note-plan API, chords/rests, tempo, cancellation | MusicXML/AI adapters, score tempo changes and pedal phrasing |
 | `ada_piano/ai_tutor` | Compare the next note, correct higher/lower, optional speech | Hand-position context and AI-generated explanations |
 
 Music Sheet supplies the expected notes. Sound sensor supplies played notes. Tutor compares them, advances only on a correct note, and sends text or speech feedback. Camera is deliberately tested separately before it contributes hand-position observations.

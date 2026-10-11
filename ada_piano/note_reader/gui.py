@@ -6,12 +6,13 @@ import tkinter as tk
 from tkinter import ttk
 
 from ada_piano.music_sheet import note_name
-from ada_piano.note_reader import NoteReader
+from ada_piano.note_reader import NoteEvent, NoteReader
 from ada_piano.note_reader.keyboard import PianoKeyboard
+from ada_piano.playback.gui import PlaybackPanel
 
 
 class NoteReaderWindow:
-    def __init__(self, root: tk.Tk, reader=None, demo=False):
+    def __init__(self, root: tk.Tk, reader=None, demo=False, player=None):
         self.root = root
         self.reader = reader if reader is not None else NoteReader()
         self.demo = False
@@ -47,18 +48,22 @@ class NoteReaderWindow:
             ttk.Button(controls, text=label, command=command).pack(side="left", padx=(0, 6))
         ttk.Label(frame, textvariable=self.status, wraplength=1000).pack(anchor="w", pady=(10, 3))
         ttk.Label(frame, textvariable=self.activity, wraplength=1000).pack(anchor="w", pady=(0, 8))
-        ttk.Label(frame, textvariable=self.latest, font=("", 36, "bold")).pack(anchor="w")
+        ttk.Label(frame, textvariable=self.latest, font=("", 28, "bold")).pack(anchor="w")
         ttk.Label(frame, textvariable=self.details).pack(anchor="w")
-        self.keyboard = PianoKeyboard(frame)
+        self.keyboard = PianoKeyboard(frame, on_note=self._play_key)
         self.keyboard.pack(fill="x", pady=(12, 4))
-        ttk.Label(frame, text="Green = held key     Blue outline = last note played     C4 = middle C").pack(anchor="w")
+        ttk.Label(frame, text="Green = your held key     Blue fill = reference     Blue outline = last played     Click a key to hear it").pack(anchor="w")
         ttk.Label(frame, textvariable=self.held, wraplength=840).pack(anchor="w", pady=(12, 4))
         ttk.Label(frame, textvariable=self.pedal).pack(anchor="w", pady=(0, 12))
-        log_frame = ttk.Frame(frame)
-        log_frame.pack(fill="both", expand=True)
-        columns = ("time", "event", "note", "midi", "velocity", "channel")
+        self.tabs = ttk.Notebook(frame)
+        self.tabs.pack(fill="both", expand=True)
+        log_frame = ttk.Frame(self.tabs)
+        self.tabs.add(log_frame, text="MIDI event log")
+        self.playback = PlaybackPanel(self.tabs, player=player)
+        self.tabs.add(self.playback, text="Audible reference")
+        columns = ("time", "event", "note", "midi", "velocity", "channel", "duration", "source")
         self.log = ttk.Treeview(log_frame, columns=columns, show="headings", height=4)
-        for column, title in zip(columns, ("Elapsed (s)", "Event", "Note", "MIDI", "Velocity", "Channel")):
+        for column, title in zip(columns, ("Elapsed (s)", "Event", "Note", "MIDI", "Velocity", "Channel", "Duration (s)", "Source")):
             self.log.heading(column, text=title)
             self.log.column(column, width=110, minwidth=70, anchor="center")
         scroll = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
@@ -66,7 +71,7 @@ class NoteReaderWindow:
         scroll.pack(side="right", fill="y")
         self.log.pack(fill="both", expand=True)
         ttk.Label(frame, text="Keyboard MIDI OUT → cable MIDI IN → computer USB.\n"
-                  "Held keys track presses; sustain is shown separately. MIDI carries notes, not audio.",
+                  "Duration measures press to release on OFF rows; sustain is shown separately. MIDI carries notes, not audio.",
                   wraplength=840).pack(anchor="w", pady=(12, 0))
         self._started = monotonic()
         self.selector.focus_set()
@@ -74,6 +79,7 @@ class NoteReaderWindow:
             self.start_demo()
         else:
             self.refresh()
+            self.playback.refresh()
             candidates = self._instrument_ports(self.selector["values"])
             if len(candidates) == 1:
                 self.connect()
@@ -86,7 +92,8 @@ class NoteReaderWindow:
         channels = ", ".join(map(str, sorted(state.sustain)))
         self.pedal.set(f"Sustain: {'on (ch ' + channels + ')' if channels else 'off'}"
                        f"   |   Notes received: {state.note_count}")
-        self.keyboard.show_notes((note for channel, note in state.held), self._last_played)
+        self.keyboard.show_notes((note for channel, note in state.held), self._last_played,
+                                 (note for channel, note in self.playback.active))
         if self.demo:
             self.activity.set("DEMO — simulated input; the piano connection is not being tested.")
         elif self.reader.connected:
@@ -150,6 +157,7 @@ class NoteReaderWindow:
 
     def disconnect(self):
         self.demo = False
+        self.playback.stop()
         try:
             self.reader.disconnect()
             self._last_played = None
@@ -185,13 +193,19 @@ class NoteReaderWindow:
             return SimpleNamespace(type=kind, channel=0, control=number, value=value)
         return SimpleNamespace(type=kind, channel=0, note=number, velocity=value)
 
-    def _record(self, event):
-        if event.kind == "on":
+    def _play_key(self, pitch):
+        self.tabs.select(self.playback)
+        self.playback.play_note(pitch)
+
+    def _record(self, event, source="Piano"):
+        if event.kind == "on" and source != "Reference":
             self._last_played = event.note
-        self.latest.set(f"{event.name}  {'pressed' if event.kind == 'on' else 'released'}")
-        self.details.set(f"MIDI {event.note}   Velocity {event.velocity}   Channel {event.channel}")
+        if source != "Reference":
+            self.latest.set(f"{event.name}  {'pressed' if event.kind == 'on' else 'released'}")
+            self.details.set(f"MIDI {event.note}   Velocity {event.velocity}   Channel {event.channel}")
         row = self.log.insert("", "end", values=(f"{event.timestamp - self._started:.2f}",
-                              event.kind.upper(), event.name, event.note, event.velocity, event.channel))
+                              event.kind.upper(), event.name, event.note, event.velocity, event.channel,
+                              "—" if event.duration is None else f"{event.duration:.3f}", source))
         children = self.log.get_children()
         if len(children) > 500:
             self.log.delete(*children[:-500])
@@ -204,7 +218,7 @@ class NoteReaderWindow:
                 if now >= self._demo_due:
                     event = self.reader.state.consume(self._demo_message())
                     if event is not None:
-                        self._record(event)
+                        self._record(event, source="Demo")
                     self._demo_due = now + 0.4
             elif self.reader.connected:
                 if now >= self._check_due:
@@ -212,6 +226,9 @@ class NoteReaderWindow:
                     self._check_due = now + 2
                 for event in self.reader.poll():
                     self._record(event)
+            for event in self.playback.poll():
+                self._record(NoteEvent(event.kind, event.note, event.velocity, event.channel,
+                                       event.timestamp, event.duration), source="Reference")
             self._show_state()
         except Exception as exc:
             self._error(exc)
@@ -226,9 +243,12 @@ class NoteReaderWindow:
         if self._timer is not None:
             self.root.after_cancel(self._timer)
         try:
-            self.reader.disconnect()
+            self.playback.player.close()
         finally:
-            self.root.destroy()
+            try:
+                self.reader.disconnect()
+            finally:
+                self.root.destroy()
 
 
 def launch(demo=False):
