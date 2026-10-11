@@ -7,6 +7,60 @@ practice. See the [PDF import workflow](docs/SCORE_IMPORT.md) for setup and the
 
 Accessible Piano Learning Assistant: a Python hackathon prototype for blind and visually impaired learners.
 
+## ADA AI Coach
+
+The language model does not determine which notes were played. MIDI and the
+deterministic evaluator provide performance facts; ADA uses those facts for
+coaching and practice decisions. Local pitch/chord practice works offline and
+does not require an OpenAI account. The optional coach uses the OpenAI Responses
+API with a small allowlisted tool surface; it is not an autonomous teacher.
+
+```sh
+uv sync --extra midi --extra camera --extra agent
+# Linux system speech (optional):
+sudo apt install espeak-ng
+# Set OPENAI_API_KEY securely in your shell or secret manager; never commit it.
+export ADA_OPENAI_MODEL=gpt-4.1-mini
+uv run --extra midi --extra camera --extra agent python -m ada_piano note-reader
+```
+
+On PowerShell use `$env:ADA_OPENAI_MODEL = 'gpt-4.1-mini'`; supply
+`OPENAI_API_KEY` privately through your environment. Missing credentials or SDK,
+network failures, and model errors leave MIDI and local practice available.
+API use requires a funded API account separately from a ChatGPT subscription.
+
+1. In **Scores · import & practice**, load, review and approve a short passage.
+2. Connect MIDI input and practice it. Attempts record structured pitch/chord
+   results in memory, including repeats and measured chord attack spread.
+3. In **ADA Coach**, type “What should I work on?” and press **Ask ADA** or Enter.
+4. Ask to hear a specific approved measure. Confirm the playback request,
+   select a MIDI output in Audible reference, and keep the Yamaha audible.
+   ADA can queue targeted practice after the reference finishes.
+
+**Speak responses** is off by default. Speech runs in a cancellable background
+worker: Linux uses `espeak-ng`, macOS `say`, Windows PowerShell/System.Speech.
+No Python TTS package is needed; the `speech` extra remains a compatibility
+alias. Missing or failed speech falls back to visible text. Reference playback
+waits for its announcement; practice waits for “Your turn.” **Stop** cancels
+pending coach actions, speech and reference sound without disconnecting MIDI.
+
+**Save latest attempt** exports JSON through a background writer. Attempts are
+not automatically persisted; reopening the app does not restore a practice
+session. Exported attempts include approved score identity, passage, monotonic
+times, results, summary and coaching history, but not raw camera/MIDI streams.
+Only sanitized approved score context and deterministic summaries are sent to
+OpenAI, together with your question and at most three recent exchanges. Local
+file paths and raw video/landmarks are excluded. Responses use `store=False`;
+your API account's data policies still apply.
+
+Limitations: guided pitch/chord attacks only, not rhythm grading, pedal grading
+or inferred fingering. MIDI timing currently reflects GUI polling. Calibrated
+camera/finger-to-key evidence is unavailable. Model prose can still be wrong;
+the local evaluator remains authoritative. Tool actions are validated locally,
+cannot approve scores or load files, and cannot send arbitrary MIDI. Physical
+speech, Yamaha output and a live API request require local validation. No
+microphone or always-listening functionality is included.
+
 ## Automated checks
 
 GitHub Actions runs the tests on pull requests and pushes to `main`, using
@@ -246,7 +300,7 @@ JSON for future agents; no language-model integration is enabled.
 
 Music Sheet supplies the expected notes. Sound sensor supplies played notes. Tutor compares them, advances only on a correct note, and sends text or speech feedback. Camera is deliberately tested separately before it contributes hand-position observations.
 
-The current tutor is rule based, not an AI model. It evaluates pitches and chord attacks, not rhythmic accuracy, fingering, or posture. MIDI captures key presses and releases, not audio. Chord notes must be held together and pressed within 150 ms by default (`--chord-window-ms` changes this). This is a finger-timing tolerance, not tempo grading. The camera check does not yet detect hands. Speech blocks the feedback loop; MIDI events are timestamped and queued by the input callback during speech. Use slow practice until live hardware and speech latency are validated.
+The local tutor is rule based. It evaluates pitches and chord attacks, not rhythmic accuracy, fingering, or posture. MIDI captures key presses and releases, not audio. Chord notes must be held together and pressed within 150 ms by default (`--chord-window-ms` changes this). This is a simultaneity tolerance, not tempo grading. Camera landmarks are not calibrated fingering evidence. System speech is queued outside capture and GUI threads; hardware and speech latency still require validation.
 
 ## Test each part separately
 
@@ -290,6 +344,6 @@ See [PLAN.md](PLAN.md) for the delivery order and acceptance checks.
 - [Yamaha YPT-300 / PSR-E303 manual](https://data.yamaha.com/download/files/2091886): computer and MIDI connection.
 - [Mido RtMidi backend](https://mido.readthedocs.io/en/stable/backends/rtmidi.html): MIDI input setup.
 - [OpenCV camera capture](https://docs.opencv.org/4.x/dd/d43/tutorial_py_video_display.html): capture and cleanup.
-- [pyttsx3 engine](https://pyttsx3.readthedocs.io/en/latest/engine.html): local speech.
+- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling): optional bounded coaching tools.
 - [MediaPipe Python setup](https://developers.google.com/edge/mediapipe/solutions/setup_python): future hand-tracking dependency.
 # ADACVA

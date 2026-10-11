@@ -1,0 +1,76 @@
+"""Allowlisted operations on an approved in-memory score, never files or raw MIDI."""
+
+from dataclasses import replace
+import math
+
+from ada_piano.music_sheet import Exercise
+from ada_piano.score_import.review import playback_notes
+
+
+def passage_context(review):
+    data = review.context()
+    data.pop("musicxml", None)
+    data["calibrated_fingering_available"] = False
+    for index, event in enumerate(data["events"]):
+        event["event_index"] = index
+    return data
+
+
+def select_passage(review, start_measure, end_measure):
+    """Use score labels, not guessed measure positions; never reread another file."""
+    review.context()  # approval gate
+    if not isinstance(start_measure, str) or not isinstance(end_measure, str):
+        raise ValueError("Measure labels must be strings from the approved passage.")
+    labels = list(dict.fromkeys(e.measure for e in review.exercise.events))
+    if start_measure not in labels or end_measure not in labels:
+        raise ValueError("Requested measure is outside the approved passage.")
+    first, last = labels.index(start_measure), labels.index(end_measure)
+    if first > last:
+        raise ValueError("Measure range is reversed.")
+    chosen = set(labels[first:last + 1])
+    original = [e for e in review.exercise.events if e.measure in chosen]
+    rests = [r for r in review.exercise.rests if r.measure in chosen]
+    origin = min([e.onset for e in original] + [r.onset for r in rests])
+    events = tuple(replace(e, onset=e.onset - origin) for e in original)
+    rests = tuple(replace(r, onset=r.onset - origin) for r in rests)
+    return Exercise(review.exercise.title, tuple(n for e in events for n in e.pitches), events, rests)
+
+
+class AgentTools:
+    def __init__(self, review, summary=None, action=None):
+        self.review = review
+        self.summary = summary
+        self.action = action
+
+    def dispatch(self, name, arguments):
+        if not isinstance(arguments, dict):
+            raise ValueError("Tool arguments must be an object.")
+        if name in {"get_current_passage", "get_attempt_summary", "stop_practice"}:
+            if arguments:
+                raise ValueError("This tool takes no arguments.")
+            if name == "get_current_passage":
+                return passage_context(self.review) if self.review else {"status": "no_approved_score"}
+            if name == "get_attempt_summary":
+                return self.summary or {"status": "no_attempt"}
+            return self._action(name, {})
+        allowed = {"start_measure", "end_measure"}
+        if name == "play_reference":
+            allowed |= {"tempo"}
+        elif name != "start_practice":
+            raise ValueError("Unknown or forbidden tool.")
+        if set(arguments) != allowed:
+            raise ValueError("Unexpected or missing tool arguments.")
+        if self.review is None:
+            raise ValueError("No approved passage is loaded.")
+        exercise = select_passage(self.review, arguments["start_measure"], arguments["end_measure"])
+        if name == "play_reference":
+            tempo = arguments["tempo"]
+            if type(tempo) not in (int, float) or not math.isfinite(tempo):
+                raise ValueError("Tempo must be a finite number.")
+            playback_notes(exercise, tempo=tempo)  # existing safety limits
+        return self._action(name, arguments)
+
+    def _action(self, name, arguments):
+        if self.action is None:
+            return {"status": "actions_unavailable"}
+        return self.action(name, arguments)

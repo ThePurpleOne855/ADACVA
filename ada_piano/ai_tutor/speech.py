@@ -1,26 +1,22 @@
-"""Optional local speech. Text always remains available to screen readers."""
+"""Legacy CLI feedback over nonblocking system speech."""
+
+from ada_piano.voice import VoiceService
 
 
 class Feedback:
     def __init__(self, speak: bool = False):
-        self.engine = None
-        if speak:
-            try:
-                import pyttsx3
-                self.engine = pyttsx3.init()
-                self.engine.setProperty("rate", 165)
-            except Exception as exc:
-                raise RuntimeError(
-                    'Speech unavailable. Run uv sync --extra speech and install a system voice '
-                    '(Linux: eSpeak NG), or omit --speak for text mode.'
-                ) from exc
+        self.engine = VoiceService() if speak else None
+        self._last = None
+        if self.engine is not None and not self.engine.available:
+            print(self.engine.status, flush=True)
 
     def say(self, text: str):
         print(text, flush=True)
         if self.engine is not None:
-            self.engine.say(text)
-            self.engine.runAndWait()
+            self._last = self.engine.say(text)
 
     def close(self):
         if self.engine is not None:
-            self.engine.stop()
+            if self._last is not None:
+                self._last.wait(timeout=5)
+            self.engine.close()
