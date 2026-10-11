@@ -23,7 +23,7 @@ ada-piano = "ada_piano.cli:main"
 include = ["ada_piano*"]
 
 [tool.setuptools.package-data]
-ada_piano = ["exercises/*.json", "exercises/*.musicxml"]
+ada_piano = ["exercises/*.json", "exercises/*.musicxml", "pieces/*.json", "pieces/*.musicxml", "pieces/*.mxl"]
 
 [tool.pyright]
 venvPath = "."

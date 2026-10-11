@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "pieces": [
+    {
+      "id": "fur_elise",
+      "title": "Für Elise (easy arrangement)",
+      "composer": "Ludwig van Beethoven",
+      "file": "fur_elise.mxl",
+      "aliases": ["fur elise", "für elise", "fuer elise", "elise"],
+      "part": "P1",
+      "written_order": true,
+      "default_tempo": 60,
+      "hands": {"both": null, "right": "1", "left": "2"},
+      "passages": {
+        "theme": [1, 9, "the opening theme, measures 0 to 8"],
+        "middle": [10, 17, "the middle section, measures 9 to 16"],
+        "ending": [17, 24, "the return of the theme, measures 16 to 23"],
+        "whole": [1, 24, "the whole piece, repeats played once"]
+      },
+      "verified": "Audiveris output checked note by note against test_examples/fur_elise_piano.pdf (2026-10-11)."
+    },
+    {
+      "id": "ode_to_joy",
+      "title": "Ode to Joy",
+      "composer": "Ludwig van Beethoven",
+      "file": "ode_to_joy.musicxml",
+      "aliases": ["ode to joy", "ode", "joy", "ninth symphony"],
+      "part": "P1",
+      "written_order": false,
+      "default_tempo": 80,
+      "hands": {"right": "1"},
+      "passages": {
+        "first phrase": [1, 4, "the first phrase, measures 1 to 4"],
+        "second phrase": [5, 8, "the second phrase, measures 5 to 8"],
+        "whole": [1, 8, "the whole melody"]
+      },
+      "verified": "Written by hand from the public-domain melody (2026-10-11)."
+    }
+  ]
+}

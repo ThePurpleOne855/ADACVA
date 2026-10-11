@@ -225,5 +225,39 @@ class NoteReaderTests(unittest.TestCase):
         self.assertIsNone(self.reader.last_received)
 
 
+class CallbackPort(FakePort):
+    """Mimics Mido's rtmidi input, where poll() is unusable once a callback is set."""
+    _callback = None
+
+    @property
+    def callback(self):
+        return self._callback
+
+    @callback.setter
+    def callback(self, function):
+        self._callback = function
+
+    def poll(self):
+        raise AssertionError("poll() must not be used with a callback port")
+
+
+class CallbackTimingTests(unittest.TestCase):
+    def test_arrival_time_is_kept_even_when_drained_late(self):
+        backend = FakeBackend()
+        port = CallbackPort()
+        backend.open_input = lambda name: port
+        reader = NoteReader(backend)
+        reader.connect("USB MIDI")
+        with patch("ada_piano.note_reader.monotonic", side_effect=[5.0, 5.5]):
+            port.callback(note())
+            port.callback(note("note_off"))
+        with patch("ada_piano.note_reader.monotonic", return_value=99.0):
+            on, off = reader.poll()
+        self.assertEqual((on.timestamp, off.timestamp, off.duration), (5.0, 5.5, 0.5))
+        self.assertEqual(reader.last_received, 5.5)
+        reader.disconnect()
+        self.assertEqual(reader.poll(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

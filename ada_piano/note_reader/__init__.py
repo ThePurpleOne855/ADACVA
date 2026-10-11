@@ -4,6 +4,7 @@ MIDI and GUI dependencies are loaded only when needed. Channels are displayed
 as 1–16; held keys mean physical key presses, not notes prolonged by sustain.
 """
 
+from collections import deque
 from dataclasses import dataclass
 from time import monotonic
 
@@ -37,7 +38,7 @@ class NoteState:
         self.note_count = 0
         self._pressed_at.clear()
 
-    def consume(self, message) -> NoteEvent | None:
+    def consume(self, message, timestamp: float | None = None) -> NoteEvent | None:
         if message.type == "reset":
             self.reset()
         elif message.type == "control_change":
@@ -56,7 +57,8 @@ class NoteState:
             channel = message.channel + 1
             pressed = message.type == "note_on" and message.velocity > 0
             key = (channel, message.note)
-            timestamp = monotonic()
+            if timestamp is None:
+                timestamp = monotonic()
             duration = None
             if pressed:
                 self.held[key] = message.velocity
@@ -77,7 +79,9 @@ class NoteReader:
     """Nonblocking reader. Call all methods from one thread (the GUI thread).
 
     An optional backend allows tests to exercise connection handling without
-    hardware. Production explicitly selects Mido's python-rtmidi backend.
+    hardware. Production explicitly selects Mido's python-rtmidi backend, whose
+    callback timestamps each message on arrival; poll() only drains them, so
+    GUI or speech delays do not distort timing.
     """
 
     def __init__(self, backend=None):
@@ -89,6 +93,12 @@ class NoteReader:
         self.last_message: str | None = None
         self.last_received: float | None = None
         self.connected_at: float | None = None
+        self._arrivals = deque()
+        self._callback = False
+
+    def _receive(self, message):
+        # Runs on the backend thread; deque appends are thread-safe.
+        self._arrivals.append((monotonic(), message))
 
     def _get_backend(self):
         if self._backend is None:
@@ -113,7 +123,11 @@ class NoteReader:
         self.disconnect()
         if port_name not in self.list_ports():
             raise RuntimeError("That MIDI input is unavailable. Refresh inputs and select it again.")
+        self._arrivals.clear()
         self._port = self._get_backend().open_input(port_name)
+        self._callback = isinstance(getattr(type(self._port), "callback", None), property)
+        if self._callback:
+            self._port.callback = self._receive
         self.port_name = port_name
         self.connected_at = monotonic()
 
@@ -125,6 +139,8 @@ class NoteReader:
         self.last_message = None
         self.last_received = None
         self.connected_at = None
+        self._callback = False
+        self._arrivals.clear()
         if port is not None:
             port.close()
 
@@ -143,13 +159,19 @@ class NoteReader:
                 raise RuntimeError("MIDI input closed. Refresh inputs and reconnect.")
             # Limit work per GUI tick, including non-note messages such as clocks.
             for _ in range(limit):
-                message = self._port.poll()
-                if message is None:
-                    break
+                if self._callback:
+                    if not self._arrivals:
+                        break
+                    received, message = self._arrivals.popleft()
+                else:
+                    message = self._port.poll()
+                    if message is None:
+                        break
+                    received = monotonic()
                 self.message_count += 1
                 self.last_message = message.type
-                self.last_received = monotonic()
-                event = self.state.consume(message)
+                self.last_received = received
+                event = self.state.consume(message, received)
                 if event is not None:
                     events.append(event)
         except Exception:
