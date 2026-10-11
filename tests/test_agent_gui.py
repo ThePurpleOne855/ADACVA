@@ -107,23 +107,22 @@ class AgentGuiTests(unittest.TestCase):
         self.assertEqual(self.window.score.tutor.exercise.notes, (65,))
         self.assertEqual(len(self.window.score.attempt.context["events"]), 1)
 
-    def test_playback_confirm_and_wait_for_announcement(self):
+    def test_playback_announced_aloud_without_dialog(self):
         panel = self.prepare(FakeClient([]))
         panel.speak.set(True)
         spoken = Event()
         panel.voice.say = lambda text: spoken
         review = self.window.score.loaded
         args = {"start_measure": "6", "end_measure": "6", "tempo": 60}
-        with patch("ada_piano.agent.gui.messagebox.askyesno", return_value=True):
+        with patch("ada_piano.agent.gui.messagebox.askyesno") as dialog:
             self.assertEqual(panel._perform(review, "play_reference", args)["status"], "queued")
+            dialog.assert_not_called()
         with patch.object(self.window.playback, "play_exercise") as play:
             panel._advance_actions()
             play.assert_not_called()
             spoken.set()
             panel._advance_actions()
             self.assertEqual(play.call_args.args[0].notes, (65,))
-        with patch("ada_piano.agent.gui.messagebox.askyesno", return_value=False):
-            self.assertEqual(panel._perform(review, "play_reference", args)["status"], "declined")
 
     def test_close_cleans_voice(self):
         panel = self.prepare(FakeClient([]))
@@ -136,8 +135,7 @@ class AgentGuiTests(unittest.TestCase):
         panel.speak.set(True)
         panel.voice.say = lambda text: Event()
         args = {"start_measure": "6", "end_measure": "6", "tempo": 60}
-        with patch("ada_piano.agent.gui.messagebox.askyesno", return_value=True):
-            panel._perform(self.window.score.loaded, "play_reference", args)
+        panel._perform(self.window.score.loaded, "play_reference", args)
         self.window.score.stop()
         panel._advance_actions()
         self.assertIsNone(panel._pending_reference)

@@ -51,8 +51,16 @@ def camera_frames(source: CameraSource, stop: Event):
         with mp.tasks.vision.HandLandmarker.create_from_options(options) as tracker:
             if stop.is_set():
                 return
-            camera = cv2.VideoCapture(source)
+            if isinstance(source, str) and "://" in source:
+                # Network cameras (phone apps over Wi-Fi): fail within seconds, not minutes.
+                camera = cv2.VideoCapture(source, cv2.CAP_FFMPEG, [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+                                                                    cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000])
+            else:
+                camera = cv2.VideoCapture(source)
             if not camera.isOpened():
+                if isinstance(source, str) and "://" in source:
+                    raise RuntimeError(f"Cannot reach the phone camera at {source}. Open the camera app on the "
+                                       "phone, keep it on the same Wi-Fi, and check the address it shows.")
                 raise RuntimeError(f"Cannot open camera source {source}. Check permissions or try another source.")
             previous_timestamp = -1
             while not stop.is_set():

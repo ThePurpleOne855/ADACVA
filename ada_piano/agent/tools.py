@@ -2,9 +2,11 @@
 
 from dataclasses import replace
 import math
+import re
 
 from ada_piano import pieces
 from ada_piano.music_sheet import Exercise
+from ada_piano.playback import PlaybackNote, parse_note, validate_notes
 from ada_piano.score_import.review import playback_notes
 
 
@@ -54,7 +56,7 @@ class AgentTools:
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be an object.")
         if name in {"get_current_passage", "get_attempt_summary", "get_performance_report",
-                    "list_pieces", "stop_practice"}:
+                    "list_pieces", "stop_practice", "replay_my_playing"}:
             if arguments:
                 raise ValueError("This tool takes no arguments.")
             if name == "get_current_passage":
@@ -65,7 +67,11 @@ class AgentTools:
                 return self.performance or {"status": "no_play_through"}
             if name == "list_pieces":
                 return {"pieces": [piece.describe() for piece in self._pieces()]}
+            if name == "replay_my_playing" and not self.performance:
+                return {"status": "no_play_through"}
             return self._action(name, {})
+        if name == "play_notes":
+            return self._action(name, note_plan(arguments))
         if name == "load_piece":
             return self._load_piece(arguments)
         allowed = {"start_measure", "end_measure"}
@@ -110,3 +116,27 @@ class AgentTools:
         if self.action is None:
             return {"status": "actions_unavailable"}
         return self.action(name, arguments)
+
+
+def note_plan(arguments):
+    """Validate a short demonstration: up to 16 piano notes as a melody or one chord."""
+    if set(arguments) != {"notes", "chord", "tempo"}:
+        raise ValueError("play_notes needs notes, chord and tempo.")
+    text, chord, tempo = arguments["notes"], arguments["chord"], arguments["tempo"]
+    if not isinstance(text, str) or type(chord) is not bool:
+        raise ValueError("notes must be a string and chord a boolean.")
+    if type(tempo) not in (int, float) or not math.isfinite(tempo) or not 30 <= tempo <= 200:
+        raise ValueError("Tempo must be from 30 to 200 BPM.")
+    tokens = [t for t in re.split(r"[\s,]+", text.strip()) if t]
+    if not 1 <= len(tokens) <= 16:
+        raise ValueError("Play between 1 and 16 notes, such as 'C4 E4 G4'.")
+    pitches = [parse_note(t) for t in tokens]
+    if any(not 21 <= p <= 108 for p in pitches):
+        raise ValueError("Notes must be on an 88-key piano (A0 to C8).")
+    if chord:
+        pitches = sorted(set(pitches))
+        notes = [PlaybackNote(p, 0, 2, 70, 1) for p in pitches]
+    else:
+        notes = [PlaybackNote(p, i, 1, 70, 1) for i, p in enumerate(pitches)]
+    validate_notes(notes, tempo)
+    return {"notes": " ".join(tokens), "chord": chord, "tempo": tempo, "plan": notes}

@@ -121,6 +121,17 @@ class PlaybackPanel(ttk.Frame):
         except Exception as exc:
             self.status.set(f"Cannot play score: {exc}")
 
+    def play_plan(self, notes, tempo):
+        """Play validated PlaybackNotes chosen by the coach (notes, chords, a replayed take)."""
+        try:
+            if not self.output.get():
+                self.refresh()
+            self.player.play_notes(list(notes), port_name=self.output.get(), tempo=tempo)
+            self._last_status = self.player.status
+            self.status.set(self._last_status.detail)
+        except Exception as exc:
+            self.status.set(f"Cannot play: {exc}")
+
     def stop(self):
         self.player.stop()
 

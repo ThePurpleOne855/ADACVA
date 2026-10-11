@@ -6,7 +6,7 @@ from tkinter import ttk
 from ada_piano.camera.stream import CameraWorker
 from ada_piano.camera.source import parse_camera_source
 from ada_piano.camera.controller import CameraController
-from ada_piano.camera.devices import camera_choices
+from ada_piano.camera.devices import best_camera, camera_choices
 
 
 class CameraPanel(ttk.LabelFrame):
@@ -21,7 +21,8 @@ class CameraPanel(ttk.LabelFrame):
         self.selection = self.source
         self._choices = {}
         self.status = tk.StringVar(value="Camera off. MIDI works independently.")
-        ttk.Label(self, text="Camera source:").pack(anchor="w")
+        ttk.Label(self, text="Camera source (USB webcam, or a phone camera app's address such as 192.168.1.20:8080):",
+                  wraplength=410).pack(anchor="w")
         self.selector = ttk.Combobox(self, textvariable=self.selection)
         self.source_field = self.selector
         self.selector.pack(fill="x", pady=(4, 8))
@@ -40,7 +41,17 @@ class CameraPanel(ttk.LabelFrame):
                   "Preview is unmirrored. Tracking does not grade fingering.",
                   wraplength=410).pack(anchor="w", pady=(8, 0))
         self.refresh()
+        source, _ = best_camera()
+        self.selection.set(next((label for label, index in self._choices.items() if index == source), str(source)))
         self._timer = self.after(50, self._tick)
+
+    def auto_start(self):
+        """Start the best available camera; returns a spoken description."""
+        self.refresh()
+        source, name = best_camera()
+        self.selection.set(next((label for label, index in self._choices.items() if index == source), str(source)))
+        self.start()
+        return name
 
     def refresh(self):
         text = self.selection.get()

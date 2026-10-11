@@ -9,13 +9,17 @@ from tkinter import filedialog, messagebox, ttk
 
 from ada_piano import pieces
 from ada_piano.ai_tutor.performance import describe
-from ada_piano.voice import VoiceService
+from ada_piano.voice import VoiceService, piper_tts
 from . import local_commands
 from .coach import Coach, error_message
 from .cloud_voice import CloudVoiceService, VOICES
 from .session import ChatSession
 from .speech_input import create_speech_input, voice_command
 from .tools import AgentTools, passage_context, select_passage
+
+
+NATURAL_VOICE = "Natural (offline)"
+SOUND_TOOLS = {"play_reference", "play_notes", "replay_my_playing"}
 
 
 class CoachPanel(ttk.Frame):
@@ -50,6 +54,7 @@ class CoachPanel(ttk.Frame):
         self._reference_waiter = None
         self._request_playback_status = None
         self._request = None
+        self.camera = None  # optional callable(on=True) -> spoken status, set by the main window
         self.local_commands = hasattr(self.score, "load_piece")
         if self.local_commands and getattr(self.score, "announce", None) is None:
             self.score.announce = self.announce
@@ -108,7 +113,16 @@ class CoachPanel(ttk.Frame):
                                   yscrollcommand=scrollbar.set)
         self.transcript.pack(fill="both", expand=True)
         scrollbar.configure(command=self.transcript.yview)
+        self.voice_selector["values"] = (*self.voice_selector["values"], NATURAL_VOICE)
         self._timer = self.after(30, self._poll)
+
+    def use_best_voice(self):
+        """OpenAI voice with a key; otherwise natural offline, then system speech."""
+        if self._injected_voice:
+            return
+        if not (self._api_key or os.environ.get("OPENAI_API_KEY")):
+            self.voice_choice.set(NATURAL_VOICE if piper_tts.available() else "System (local)")
+            self._voice_changed()
 
     def _update_connection(self):
         configured = bool(self._api_key or os.environ.get("OPENAI_API_KEY"))
@@ -210,7 +224,29 @@ class CoachPanel(ttk.Frame):
                               "No play-through yet for this passage. Say: ADA, record. Then play.")
         elif name == "reference":
             self._local_reference()
+        elif name == "replay":
+            plan = self.score.replay_plan()
+            if not plan:
+                self.announce("There's no recording of this passage yet. Say record, then play.")
+            else:
+                self.stop()
+                self._queue_local_sound(plan, 60, "Here's how your last play-through sounded.")
+        elif name in ("camera", "camera_off"):
+            if self.camera is None:
+                self.announce("The camera isn't available in this window.")
+            else:
+                self.announce(self.camera() if name == "camera" else self.camera(False))
         return True
+
+    def _queue_local_sound(self, plan, tempo, announcement):
+        self._append("ADA", announcement)
+        if self.speak.get():
+            finished = self._say(announcement)
+        else:
+            finished = Event()
+            finished.set()
+        self._activity_version = self.score.activity_version
+        self._pending_reference = (self.score.loaded, plan, tempo, finished)
 
     def _local_reference(self):
         review = self.score.loaded
@@ -219,23 +255,22 @@ class CoachPanel(ttk.Frame):
             return
         self.stop()
         tempo = self.score.take_tempo or self.score.playback.tempo.get()
-        announcement = "Listen. Then it's your turn."
-        self._append("ADA", announcement)
-        if self.speak.get():
-            finished = self._say(announcement)
-        else:
-            finished = Event()
-            finished.set()
-        self._activity_version = self.score.activity_version
-        self._pending_reference = (review, review.exercise, tempo, finished)
+        self._queue_local_sound(review.exercise, tempo, "Listen. Then it's your turn.")
 
     def _voice_changed(self, event=None):
         if self._injected_voice:
             return
         self.voice.close()
-        self.voice = VoiceService() if self.voice_choice.get() == "System (local)" else CloudVoiceService()
-        self.voice_status.set("Local system voice selected." if self.voice_choice.get() == "System (local)" else
-                              "OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
+        choice = self.voice_choice.get()
+        if choice == NATURAL_VOICE:
+            self.voice = piper_tts.PiperVoiceService()
+            self.voice_status.set(self.voice.status)
+        elif choice == "System (local)":
+            self.voice = VoiceService()
+            self.voice_status.set("Local system voice selected.")
+        else:
+            self.voice = CloudVoiceService()
+            self.voice_status.set("OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
 
     def listen(self):
         self.hands_free.set(False)
@@ -247,6 +282,16 @@ class CoachPanel(ttk.Frame):
             self.microphone_status.set("Stop practice / playback or wait for ADA before speaking a question.")
             return
         self._poll_microphone()
+
+    def listen_after_speech(self, tries=600):
+        """Open the microphone once ADA finishes speaking (e.g. after a question)."""
+        if self._closed or not self.microphone.available:
+            return
+        if not self._speech_done.is_set():
+            if tries:
+                self.after(100, lambda: self.listen_after_speech(tries - 1))
+            return
+        self.listen()
 
     def _hands_free_changed(self):
         self._listen_pending = False
@@ -382,6 +427,8 @@ class CoachPanel(ttk.Frame):
     def _perform(self, review, name, arguments):
         if name == "load_piece":
             return self._perform_load(arguments)
+        if name in ("play_notes", "replay_my_playing"):
+            return self._perform_sound(name, arguments)
         if review is None or self.score.loaded is not review or not review.approved:
             return {"status": "rejected", "reason": "Approved selection changed or is not loaded."}
         if self._request_stale():
@@ -400,22 +447,10 @@ class CoachPanel(ttk.Frame):
             self._reference_outcome = "failed"
         exercise = select_passage(review, arguments["start_measure"], arguments["end_measure"])
         if name == "play_reference":
-            self._reference_outcome = "declined"
-            if not messagebox.askyesno("ADA reference", f"Play approved measures {arguments['start_measure']}–{arguments['end_measure']} at {arguments['tempo']} BPM?", parent=self):
-                return {"status": "declined"}
-            if self._cancel.is_set() or self._request_stale() or self.score.loaded is not review or not review.approved:
-                return {"status": "cancelled", "reason": "Request or approval changed during confirmation."}
-            self.score.stop()
-            self._activity_version = self.score.activity_version
-            self._request_playback_status = self.score.playback.player.status
+            # No visual confirmation dialog: ADA announces sound aloud first, and
+            # Stop (Esc or "stop") cancels it, so the flow works without sight.
             announcement = f"I'll play measure {arguments['start_measure']} through {arguments['end_measure']} once."
-            self._append("ADA", announcement)
-            finished = self._say(announcement) if self.speak.get() else Event()
-            if not self.speak.get():
-                finished.set()
-            self._pending_reference = (review, exercise, arguments["tempo"], finished)
-            self._reference_outcome = "pending"
-            return {"status": "queued", "announcement": announcement}
+            return self._queue_sound(review, exercise, arguments["tempo"], announcement)
         if self._reference_outcome in ("failed", "cancelled", "declined"):
             return {"status": "rejected", "reason": "Reference did not finish. Ask again to start a new practice request."}
         context = passage_context(review)
@@ -443,6 +478,37 @@ class CoachPanel(ttk.Frame):
         self._activity_version = self.score.activity_version
         self.status.set(self.score.feedback.get())
         return {"status": ("recording" if mode == "record" else "practicing") if started else "unavailable"}
+
+    def _queue_sound(self, review, plan, tempo, announcement):
+        if self._cancel.is_set() or self._request_stale():
+            return {"status": "cancelled", "reason": "Local activity changed."}
+        if self.score.tutor is not None or getattr(self.score, "take", None) is not None:
+            return {"status": "rejected", "reason": "The learner is playing; wait until they finish."}
+        self.score.stop()
+        self._activity_version = self.score.activity_version
+        self._request_playback_status = self.score.playback.player.status
+        self._append("ADA", announcement)
+        if self.speak.get():
+            finished = self._say(announcement)
+        else:
+            finished = Event()
+            finished.set()
+        self._pending_reference = (review, plan, tempo, finished)
+        self._reference_outcome = "pending"
+        return {"status": "queued", "announcement": announcement}
+
+    def _perform_sound(self, name, arguments):
+        review = self.score.loaded
+        if review is not None and self._request_review is not review:
+            return {"status": "rejected", "reason": "The loaded passage changed."}
+        if name == "play_notes":
+            kind = "chord" if arguments["chord"] else ("note" if " " not in arguments["notes"] else "notes")
+            return self._queue_sound(review, arguments["plan"], arguments["tempo"],
+                                     f"Here's the {kind}: {arguments['notes']}.")
+        plan = self.score.replay_plan() if hasattr(self.score, "replay_plan") else None
+        if not plan:
+            return {"status": "no_play_through"}
+        return self._queue_sound(review, plan, 60, "Here's how your last play-through sounded.")
 
     def _perform_load(self, arguments):
         if not hasattr(self.score, "load_piece"):
@@ -479,7 +545,7 @@ class CoachPanel(ttk.Frame):
                     review, name, args, done, box = payload
                     try:
                         box["result"] = self._perform(review, name, args)
-                        if name == "play_reference" and box["result"]["status"] == "queued":
+                        if name in SOUND_TOOLS and box["result"]["status"] == "queued":
                             self._reference_waiter = (done, box)
                     except Exception:
                         box["result"] = {"status": "failed", "reason": "Application action unavailable."}
@@ -515,7 +581,7 @@ class CoachPanel(ttk.Frame):
         if self._thread is None or not self._thread.is_alive():
             self.ask_button.configure(state="normal")
         self._poll_microphone()
-        if hasattr(self, "voice_status"):
+        if hasattr(self, "voice_status") and hasattr(self.voice, "status"):
             self.voice_status.set(self.voice.status + (" AI-generated · Reply text sent to OpenAI · API charges apply." if isinstance(self.voice, CloudVoiceService) else ""))
         if not self._closed:
             self._timer = self.after(30, self._poll)
@@ -534,8 +600,11 @@ class CoachPanel(ttk.Frame):
                 return
             if finished.is_set():
                 self._pending_reference = None
-                self.score.playback.tempo.set(str(tempo))
-                self.score.playback.play_exercise(exercise)
+                if isinstance(exercise, list):  # coach-chosen notes or a replayed take
+                    self.score.playback.play_plan(exercise, tempo)
+                else:
+                    self.score.playback.tempo.set(str(tempo))
+                    self.score.playback.play_exercise(exercise)
                 self._request_playback_status = self.score.playback.player.status
                 self._reference_active = self.score.playback.player.status.state == "playing"
                 self._reference_review = review

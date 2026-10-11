@@ -129,6 +129,12 @@ overhead mount (`mount/webcam_adapter.scad`), see [docs/CAMERA.md](docs/CAMERA.m
 
 ### Using an iPhone as the camera
 
+**Simplest, no DroidCam:** run any Wi-Fi "IP camera" app on the phone and type the
+address it shows (for example `192.168.1.20:8080`) in **Camera source**, or say
+"start camera" to use a plugged-in USB webcam. See
+[Camera without DroidCam](docs/ACCESSIBLE_PRACTICE.md#camera-without-droidcam).
+The driver-based route below still works.
+
 ADACVA does not communicate directly with iOS. First expose the iPhone to the
 operating system as a webcam, for example through DroidCam/V4L2 on Linux.
 ADACVA then opens the resulting `/dev/videoN` source through OpenCV; it does

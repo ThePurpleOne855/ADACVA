@@ -10,6 +10,7 @@ from ada_piano import pieces
 from ada_piano.ai_tutor import Tutor
 from ada_piano.ai_tutor.performance import PlayThrough, compare, describe, expected_notes
 from ada_piano.music_sheet import note_name
+from ada_piano.playback import PlaybackNote
 from ada_piano.sound_sensor import NoteEvent
 from .conversion import ScoreImporter, score_parts
 from .review import ReviewedScore
@@ -198,7 +199,8 @@ class ScorePanel(ttk.Frame):
         self.path_label.set(f"Loaded from the checked library: {piece.file.name}")
         hand_text = "both hands" if review.piece["hands"] == "both" else f"{review.piece['hands']} hand"
         text = (f"Loaded {piece.title}, {piece.passages[passage][2]}, {hand_text}. "
-                "Press F5 or say \"ADA, record\", then play. Stop for four seconds when you finish.")
+                "Say \"play it for me\" to hear it first, or \"record\" when you're ready. "
+                "Pause for four seconds when you finish.")
         self.status.set("Ready. " + text)
         self._say(text)
         return {"status": "loaded", "piece": piece.id, "title": piece.title, "passage": passage,
@@ -244,11 +246,27 @@ class ScorePanel(ttk.Frame):
         context = self.take_context
         self.latest_performance = {
             "score_sha256": context["sha256"], "selection": context["selection"],
-            "title": context["title"], "report": report, "feedback": []}
+            "title": context["title"], "report": report, "feedback": [],
+            "played": [(n.pitch, n.onset, n.release, n.velocity) for n in take.notes]}
         # No activity_version bump: scoring ends the take rather than starting new activity,
         # and a bump would make the coach cancel its request and silence this summary.
         self._say(describe(report))
         return report
+
+    def replay_plan(self):
+        """The learner's latest take for this passage as PlaybackNotes at 60 BPM (1 beat = 1 s)."""
+        if self.performance_summary() is None:
+            return None
+        played = self.latest_performance["played"]
+        start = min(onset for _, onset, _, _ in played)
+        notes = []
+        for pitch, onset, release, velocity in played:
+            offset = onset - start
+            if offset >= 295:
+                break
+            length = max(0.05, min((release or onset + 0.5) - onset, 300 - offset))
+            notes.append(PlaybackNote(pitch, round(offset, 3), round(length, 3), max(1, min(127, velocity)), 1))
+        return notes
 
     def performance_summary(self):
         """Latest report for the currently loaded passage only."""

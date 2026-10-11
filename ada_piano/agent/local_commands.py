@@ -10,13 +10,16 @@ import re
 from ada_piano import pieces
 
 HELP = ("You can say: list pieces. Practice Für Elise, or Ode to Joy, optionally with a passage "
-        "like theme, and right hand or left hand. Play it for me, to hear it. Record, then play; "
+        "like theme, and right hand or left hand. Play it for me, to hear it. Replay, to hear yourself. Start camera. Record, then play; "
         "pause four seconds when done. How did I do. Stop. Keys: F1 speak to ADA, F5 record, "
-        "F6 results, Escape stop.")
+        "F6 results, F7 camera, Escape stop.")
 
 _STOP = re.compile(r"^(stop|cancel|quiet|be quiet|pause)( (it|that|now|please|recording|practice|playing))*$")
 _HELP = re.compile(r"\b(help|what can (i|you) (say|do)|commands)\b")
 _LIST = re.compile(r"\b(what|which|list|show)\b.*\b(pieces|songs|music|scores)\b")
+_REPLAY = re.compile(r"\b(replay|play (it |that )?back|what i played|my playing|hear myself|how i sounded)\b")
+_CAMERA = re.compile(r"\b(start|turn on|open|switch on) (the )?camera\b|^camera on$")
+_CAMERA_OFF = re.compile(r"\b(stop|turn off|close|switch off) (the )?camera\b|^camera off$")
 _REFERENCE = re.compile(r"\b(play it for me|play it|let me hear|listen|demonstrate|how does it (go|sound))\b")
 _RECORD = re.compile(r"\b(record|recording|ready|let me (play|try)|start|play through|playthrough)\b")
 _RESULTS = re.compile(r"\b(how did i do|how was (that|it)|results?|feedback|score me|grade)\b")
@@ -51,6 +54,12 @@ def parse(text, catalog):
         return "list", {}
     if _RESULTS.search(plain):
         return "results", {}
+    if _CAMERA_OFF.search(plain) and short:
+        return "camera_off", {}
+    if _CAMERA.search(plain) and short:
+        return "camera", {}
+    if _REPLAY.search(plain) and short:
+        return "replay", {}
     if _REFERENCE.search(plain) and short:
         return "reference", {}
     if _RECORD.search(plain) and short and not _QUESTION.search(plain):

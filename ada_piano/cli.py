@@ -71,9 +71,23 @@ def main(argv=None) -> int:
     sources.add_argument("--index", type=int, help="Compatibility alias for an integer --source")
     camera.add_argument("--seconds", type=float, default=5)
     camera.add_argument("--preview", action="store_true", help="Open an optional visual preview")
+    voice = commands.add_parser("voice-setup", help="Download the natural offline voice (about 60 MB, once)")
+    voice.add_argument("--say", default="Hi, I'm Ada. Your offline voice is ready.",
+                       help="Sentence to speak after setup")
     args = parser.parse_args(argv)
     try:
-        if args.command == "note-reader":
+        if args.command == "voice-setup":
+            from ada_piano.voice import piper_tts
+            if not piper_tts.model_path().is_file():
+                print("Downloading the offline voice (about 60 MB)…", flush=True)
+                piper_tts.download()
+            print(f"Voice installed: {piper_tts.model_path()}")
+            service = piper_tts.PiperVoiceService()
+            if service.available:
+                service.say(args.say).wait(30)
+            service.close()
+            print(service.status)
+        elif args.command == "note-reader":
             try:
                 from ada_piano.note_reader.gui import launch
             except ImportError as exc:

@@ -1,16 +1,27 @@
 # Voice-first practice with measured feedback
 
-The app opens on the **ADA Coach** tab with speech on. A blind learner can load
-a piece, play it through and hear measured feedback without using the mouse,
-loading files or asking someone to check a score.
+The app opens on the **ADA Coach** tab with speech on. ADA greets you, asks
+"What would you like to practice today?", reads the catalog and listens for the
+answer. A blind learner can load a piece, hear it, play it through and get
+measured feedback without the mouse, loading files or a sighted helper.
 
 ```sh
+uv sync --locked --all-extras
+uv run ada-piano voice-setup      # once: natural offline voice (about 60 MB)
 uv run --locked --all-extras python -m ada_piano note-reader
 ```
 
-On Linux, install `espeak-ng` for the offline voice (`sudo pacman -S espeak-ng`,
-`sudo apt install espeak-ng`). Without it and without an OpenAI API key, ADA
-falls back to on-screen text.
+## Voice
+
+ADA picks the best voice automatically:
+
+1. **OpenAI voice** when an API key is set (most natural; API charges apply).
+2. **Natural (offline)** — Piper neural voice, free and private, after
+   `ada-piano voice-setup`. Set `ADA_PIPER_VOICE=/path/to/model.onnx` to use
+   another [Piper voice](https://huggingface.co/rhasspy/piper-voices).
+3. System voice (`espeak-ng`, macOS `say`, Windows speech), then on-screen text.
+
+Change it any time with the **Voice** list in the ADA tab.
 
 ## Keys
 
@@ -19,6 +30,7 @@ falls back to on-screen text.
 | F1 | Talk to ADA (microphone), or focus the message box |
 | F5 | Record a play-through of the loaded passage |
 | F6 | "How did I do?" |
+| F7 | Camera on/off (announces when it sees your hands) |
 | Esc | Stop everything (MIDI stays connected) |
 | F2 | Show/hide the PDF import tools (needs a sighted check) |
 
@@ -30,12 +42,39 @@ key and are handled locally, so they behave the same every time.
 - "list pieces"
 - "practice Für Elise" · "Für Elise middle, left hand" · "ode to joy"
 - "play it for me" — reference sound through the MIDI output
+- "replay" — hear your own last play-through
+- "start camera" · "stop camera"
 - "record" — then play; pause about four seconds when finished
 - "how did I do" — spoken summary (with an API key, ADA explains it in more depth)
 - "stop" · "help"
 
 Any other question goes to the ADA coach, which can also load pieces, start a
 recording of selected measures and read the measured report.
+
+## ADA uses sound when it helps
+
+With the piano's MIDI output connected, ADA decides on its own when hearing
+something would help: it plays the approved measures (often slower), a few
+notes, an interval or a chord, or replays your last play-through to contrast
+it with the reference. There is no pop-up confirmation: ADA says what it is
+about to play first, and "stop" or Esc cancels. It never plays while you are
+playing or recording.
+
+## Camera without DroidCam
+
+The camera is optional (MIDI decides which notes were played). Say "start
+camera" or press F7; the app chooses for you:
+
+1. **A USB webcam** (simplest): plug it in. It is preferred over a built-in
+   laptop camera. Virtual devices left by phone-webcam drivers ("Dummy video
+   device", DroidCam) are ignored.
+2. **A phone over Wi-Fi**, no driver needed: install any "IP camera" app that
+   shows an address (Android: *IP Webcam*; iPhone: an MJPEG/RTSP camera app),
+   keep the phone on the same Wi-Fi, and type the address it shows — e.g.
+   `192.168.1.20:8080` — in the camera field, or start with
+   `ADA_CAMERA=192.168.1.20:8080`. A bare address becomes
+   `http://…/video`; enter the app's full URL if it uses another path
+   (`rtsp://` works too).
 
 ## Checked pieces
 
@@ -82,3 +121,8 @@ under the sustain pedal.
 4. "Play it for me" with the MIDI output selected: the Yamaha should play,
    then ADA says "Your turn."
 5. With an API key, ask "What should I fix first?" after a play-through.
+6. Start the app: ADA greets you in the natural voice and lists the pieces.
+7. Plug in a USB webcam, say "start camera": ADA names the webcam and says
+   how many hands it sees. Repeat with a phone camera app's address.
+8. Ask ADA "What does a C major chord sound like?" and "Can I hear what I
+   played?": the Yamaha plays them after a spoken announcement.

@@ -1,6 +1,6 @@
 """Combined piano reader, reference playback, and optional camera preview."""
 
-import os
+import re
 from time import monotonic
 from types import SimpleNamespace
 import tkinter as tk
@@ -93,13 +93,13 @@ class NoteReaderWindow:
         ttk.Label(frame, textvariable=self.score.feedback, wraplength=840).pack(anchor="w", pady=4)
         self._started = monotonic()
         self.selector.focus_set()
+        self.coach.camera = self.camera_voice
+        self._camera_said = None
         for key, action in (("<F1>", self.talk), ("<F2>", self.toggle_import), ("<F5>", self.record),
-                            ("<F6>", self.results), ("<Escape>", self.stop_all)):
+                            ("<F6>", self.results), ("<F7>", self.toggle_camera), ("<Escape>", self.stop_all)):
             root.bind(key, lambda event, action=action: action() or "break")
         if accessible:
-            if not voice and not os.environ.get("OPENAI_API_KEY"):
-                self.coach.voice_choice.set("System (local)")
-                self.coach._voice_changed()
+            self.coach.use_best_voice()
             self.coach.speak.set(True)
             self.workspace.select(self.coach)
             self.coach.entry.focus_set()
@@ -114,10 +114,20 @@ class NoteReaderWindow:
         if accessible:
             piano = "The piano is connected." if self.reader.connected else (
                 "The piano is not connected yet. Plug in the USB MIDI cable; I'll keep checking.")
-            self._announce(f"ADA piano teacher ready. {piano} Press F1 to talk, or type and press Enter. "
-                           "Say help to hear the commands.")
+            self.greet(piano)
         self._next_scan = monotonic() + 3
         self._timer = root.after(20, self._tick)
+
+    def greet(self, piano=""):
+        """ADA opens the session: ask what to practice and read the catalog."""
+        titles = [piece.title for piece in self.score.catalog]
+        listening = self.coach.microphone.available
+        answer = "Just say its name." if listening else "Type its name and press Enter."
+        self._announce(f"Hi, I'm Ada. {piano} What would you like to practice today? "
+                       f"I have {', and '.join(titles)}. {answer} "
+                       "You can press F1 to talk to me any time, or say help.")
+        if listening:
+            self.coach.listen_after_speech()
 
     def _announce(self, text):
         if self.accessible:
@@ -130,6 +140,36 @@ class NoteReaderWindow:
         else:
             self.coach.entry.focus_set()
             self._announce("Type your message and press Enter.")
+
+    def camera_voice(self, on=True):
+        """Start/stop the camera by voice; progress is announced from _tick."""
+        if not on:
+            self.camera.stop()
+            self._camera_said = None
+            return "Camera off."
+        name = self.camera.auto_start()
+        self._camera_said = "starting"
+        return f"Starting the camera: {name}. I'll tell you when I can see your hands."
+
+    def toggle_camera(self):
+        self._announce(self.camera_voice(not self.camera.worker.running))
+
+    def _watch_camera(self):
+        """Speak the camera outcome after a voice/F7 start: error, no hands, then hands seen."""
+        if self._camera_said is None:
+            return
+        status = self.camera.status.get()
+        tracking = re.search(r"Tracking (\d+) hand", status)
+        if "error" in status.lower():
+            self._camera_said = None
+            self._announce(status.split(": ", 1)[-1] + " Try another camera, or a phone camera app's address.")
+        elif tracking:
+            self._camera_said = None
+            count = int(tracking.group(1))
+            self._announce(f"Camera is on. I can see {'one hand' if count == 1 else f'{count} hands'}.")
+        elif "No hands" in status and self._camera_said == "starting":
+            self._camera_said = "no hands"
+            self._announce("Camera is on, but I can't see your hands yet. Move them under the camera.")
 
     def toggle_import(self):
         self.score.show_import.set(not self.score.show_import.get())
@@ -317,6 +357,8 @@ class NoteReaderWindow:
                 self._record(NoteEvent(event.kind, event.note, event.velocity, event.channel,
                                        event.timestamp, event.duration), source="Reference")
             self._show_state()
+            if self.accessible:
+                self._watch_camera()
         except Exception as exc:
             self._error(exc, was_connected)
         finally:
