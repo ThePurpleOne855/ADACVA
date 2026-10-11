@@ -212,6 +212,7 @@ class StandaloneGuiTests(unittest.TestCase):
         self.panel.voice = CloudVoiceService(player=AsyncMock())
         self.panel._api_key = "private-session-key"
         self.panel.voice_choice.set("cedar")
+        self.panel.voice_speed.set("0.85")
         done = Event()
         done.set()
         with patch.object(self.panel.voice, "say", return_value=done) as say:
@@ -219,7 +220,26 @@ class StandaloneGuiTests(unittest.TestCase):
         say.assert_called_once_with("Hello")
         self.assertEqual(self.panel.voice._api_key, "private-session-key")
         self.assertEqual(self.panel.voice._voice, "cedar")
+        self.assertEqual(self.panel.voice._speed, .85)
         self.assertNotIn("private-session-key", self.panel.transcript.get("1.0", "end"))
+
+    def test_preview_pauses_microphone_without_sending_chat(self):
+        from .cloud_voice import PREVIEW_TEXT
+        self.microphone.start()
+        with patch.object(self.panel.voice, "say", return_value=Event()) as say:
+            self.panel.preview_voice()
+        say.assert_called_once_with(PREVIEW_TEXT)
+        self.assertFalse(self.microphone.running)
+        self.assertFalse(self.panel.speak.get())
+        self.client.respond.assert_not_called()
+        self.panel._poll_microphone()
+        self.assertIn("paused", self.panel.microphone_status.get())
+
+    def test_preview_does_not_interrupt_reference_playback(self):
+        self.panel._pending_reference = object()
+        with patch.object(self.panel.voice, "say") as say:
+            self.panel.preview_voice()
+        say.assert_not_called()
 
     def test_voice_selector_switches_between_local_and_cloud(self):
         from ada_piano.voice import VoiceService

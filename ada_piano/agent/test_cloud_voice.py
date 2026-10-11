@@ -8,7 +8,7 @@ import unittest
 import wave
 from unittest.mock import AsyncMock, Mock, patch
 
-from .cloud_voice import CloudVoiceService, STYLE, playback_command
+from .cloud_voice import CloudVoiceService, STYLE, DEFAULT_SPEED, playback_command, spoken_text
 
 
 class CloudVoiceTests(unittest.TestCase):
@@ -48,7 +48,7 @@ class CloudVoiceTests(unittest.TestCase):
         self.assertEqual(factory.call_args.kwargs["api_key"], "private-session")
         create.assert_called_once_with(model="gpt-4o-mini-tts", voice="cedar",
                                        input="Find middle C.", instructions=STYLE,
-                                       response_format="pcm")
+                                       speed=DEFAULT_SPEED, response_format="pcm")
         client.close.assert_awaited_once()
         self.assertEqual(len(paths), 1)
         self.assertFalse(paths[0].exists())
@@ -154,6 +154,30 @@ class CloudVoiceTests(unittest.TestCase):
             command = playback_command("untrusted'$filename.wav")
         self.assertNotIn("untrusted", command[-1])
         self.assertIn("$env:ADA_SPEECH_WAV", command[-1])
+
+    def test_music_notation_is_spoken_without_changing_octaves(self):
+        self.assertEqual(spoken_text("Play **C#4**, Bb3, F♯5, and E♭. Then C4."),
+                         "Play C sharp four, B flat three, F sharp five, and E flat. Then C four.")
+        self.assertEqual(spoken_text("A short phrase at 120 BPM."), "A short phrase at 120 BPM.")
+
+    def test_selected_speed_and_pronunciation_reach_api(self):
+        service, _, create, _, _ = self.service()
+        service.configure(api_key="session-key", voice="cedar", speed=.85)
+        self.assertTrue(service.say("Play C#4.").wait(2))
+        self.assertEqual(create.call_args.kwargs["speed"], .85)
+        self.assertEqual(create.call_args.kwargs["input"], "Play C sharp four.")
+
+    def test_invalid_speed_rejected_before_request(self):
+        service, factory, _, _, _ = self.service()
+        for value in (0, 4, float("nan"), float("inf"), True, "fast"):
+            with self.assertRaises(ValueError):
+                service.configure(speed=value)
+        factory.assert_not_called()
+
+    def test_expanded_speech_limit_does_not_submit_request(self):
+        service, factory, _, _, _ = self.service()
+        self.assertTrue(service.say("C#4 " * 700).is_set())
+        factory.assert_not_called()
 
 
 if __name__ == "__main__":

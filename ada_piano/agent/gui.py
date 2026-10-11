@@ -12,7 +12,7 @@ from ada_piano.ai_tutor.performance import describe
 from ada_piano.voice import VoiceService, piper_tts
 from . import local_commands
 from .coach import Coach, error_message
-from .cloud_voice import CloudVoiceService, VOICES
+from .cloud_voice import CloudVoiceService, VOICES, DEFAULT_VOICE, DEFAULT_SPEED, PREVIEW_TEXT
 from .session import ChatSession
 from .speech_input import create_speech_input, voice_command
 from .tools import AgentTools, passage_context, select_passage
@@ -63,7 +63,8 @@ class CoachPanel(ttk.Frame):
         self.text = tk.StringVar()
         self.speak = tk.BooleanVar(value=False)
         self.hands_free = tk.BooleanVar(value=False)
-        self.voice_choice = tk.StringVar(value="marin")
+        self.voice_choice = tk.StringVar(value=DEFAULT_VOICE)
+        self.voice_speed = tk.StringVar(value=f"{DEFAULT_SPEED:.2f}")
         self.microphone_status = tk.StringVar(value=self.microphone.status)
         self.connection = tk.StringVar()
         self._update_connection()
@@ -96,6 +97,15 @@ class CoachPanel(ttk.Frame):
                                           values=(*VOICES, "System (local)"), state="readonly", width=15)
         self.voice_selector.pack(side="left")
         self.voice_selector.bind("<<ComboboxSelected>>", self._voice_changed)
+        speech_controls = ttk.Frame(bottom)
+        speech_controls.pack(fill="x", pady=(0, 4))
+        ttk.Label(speech_controls, text="Speaking speed:").pack(side="left", padx=(5, 3))
+        self.speed_selector = ttk.Combobox(speech_controls, textvariable=self.voice_speed,
+                                          values=("0.75", "0.85", "0.95", "1.00", "1.10", "1.15"),
+                                          state="readonly", width=5)
+        self.speed_selector.pack(side="left")
+        ttk.Label(speech_controls, text="× (cloud voices)").pack(side="left", padx=4)
+        ttk.Button(speech_controls, text="Preview voice", command=self.preview_voice).pack(side="left", padx=5)
         self.voice_status = tk.StringVar(value="OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
         ttk.Label(bottom, textvariable=self.voice_status, wraplength=750).pack(anchor="w")
         settings = ttk.Frame(bottom)
@@ -175,7 +185,8 @@ class CoachPanel(ttk.Frame):
         self._listen_pending = False
         self.microphone.stop()
         if isinstance(self.voice, CloudVoiceService):
-            self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get())
+            self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get(),
+                                 speed=float(self.voice_speed.get()))
         self._speech_done = self.voice.say(text)
         return self._speech_done
 
@@ -260,6 +271,15 @@ class CoachPanel(ttk.Frame):
         self.stop()
         tempo = self.score.take_tempo or self.score.playback.tempo.get()
         self._queue_local_sound(review.exercise, tempo, "Listen. Then it's your turn.")
+
+    def preview_voice(self):
+        if (self.score.tutor is not None or self.score.playback.player.status.state == "playing"
+                or self._pending_reference is not None
+                or (self._thread is not None and self._thread.is_alive())):
+            self.status.set("Stop practice or wait for ADA to finish before previewing a voice.")
+            return
+        self._say(PREVIEW_TEXT)
+        self.status.set("Previewing the selected voice. Stop cancels the preview.")
 
     def _voice_changed(self, event=None):
         if self._injected_voice:

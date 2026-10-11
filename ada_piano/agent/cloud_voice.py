@@ -1,6 +1,8 @@
 """Opt-in OpenAI speech, with cancellable network and native WAV playback."""
 import asyncio
 import os
+import math
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,7 +16,31 @@ from .coach import AgentSetupError, error_message
 
 VOICES = ("marin", "cedar", "coral", "alloy", "ash", "ballad", "echo",
           "fable", "nova", "onyx", "sage", "shimmer", "verse")
-STYLE = "Speak warmly and naturally, like a patient piano teacher. Use a calm, friendly tone and clear pronunciation, without exaggerated enthusiasm."
+DEFAULT_VOICE = "cedar"
+DEFAULT_SPEED = 0.95
+STYLE = (
+    "Speak in clear, conversational English, as a piano teacher talking to an adult beside them. "
+    "Use a relaxed, grounded voice with natural sentence rhythm and gentle variation in intonation. "
+    "Articulate note names distinctly and leave a short pause between an explanation and an action. "
+    "Keep a comfortable, steady pace. Avoid whispering, breathiness, exaggerated cheerfulness, "
+    "sing-song delivery, a theatrical narrator voice, and drawn-out syllables. "
+    "Pronounce ADA as the name Ay-duh, not individual letters. Read only the supplied words."
+)
+PREVIEW_TEXT = "Hi, I'm Ada. Let's take this one step at a time. Find middle C, then play C4, D4, and E4. Take your time."
+
+
+def spoken_text(text):
+    """Expand music notation for speech while preserving the displayed reply."""
+    numbers = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight")
+    def note(match):
+        letter, accidental, octave = match.groups()
+        suffix = {"#": " sharp", "♯": " sharp", "b": " flat", "♭": " flat", "": ""}[accidental]
+        return letter + suffix + (" " + numbers[int(octave)] if octave else "")
+    text = re.sub(r"\b([A-G])([#♯b♭]?)([0-8])(?!\w)", note, text)
+    text = re.sub(r"\b([A-G])([#♯b♭])()(?!\w)", note, text)
+    text = re.sub(r"\[([^\]]+)\]\(https?://[^)]+\)", r"\1", text)
+    text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
+    return text.replace("`", "")
 
 
 def playback_command(path):
@@ -47,13 +73,17 @@ class CloudVoiceService:
         self._thread = Thread(target=self._run, name="ada-cloud-voice", daemon=True)
         self._thread.start()
         self._api_key = None
-        self._voice = "marin"
+        self._voice = DEFAULT_VOICE
+        self._speed = DEFAULT_SPEED
 
-    def configure(self, *, api_key=None, voice="marin"):
+    def configure(self, *, api_key=None, voice=DEFAULT_VOICE, speed=DEFAULT_SPEED):
         if voice not in VOICES:
             raise ValueError("Unknown speech voice")
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or not .75 <= speed <= 1.15:
+            raise ValueError("Speech speed must be between 0.75 and 1.15")
         with self._lock:
             self._api_key, self._voice = api_key, voice
+            self._speed = float(speed)
 
     def say(self, text, *, replace=True):
         done = Event()
@@ -67,9 +97,14 @@ class CloudVoiceService:
                 self.status = "Speech requires 1–4096 characters; the full response remains in chat."
                 done.set()
                 return done
+            text = spoken_text(text)
+            if len(text) > 4096:
+                self.status = "Spoken text exceeds 4096 characters; read the full response in chat."
+                done.set()
+                return done
             key = self._api_key or os.environ.get("OPENAI_API_KEY")
             future = asyncio.run_coroutine_threadsafe(
-                self._speak(text, key, self._voice, self._generation), self._loop)
+                self._speak(text, key, self._voice, self._speed, self._generation), self._loop)
             self._future = future
             future.add_done_callback(lambda result: done.set())
         return done
@@ -114,7 +149,7 @@ class CloudVoiceService:
             if generation == self._generation and not self._closed:
                 self.status = message
 
-    async def _speak(self, text, key, voice, generation):
+    async def _speak(self, text, key, voice, speed, generation):
         client = None
         stage = "API setup"
         try:
@@ -139,7 +174,7 @@ class CloudVoiceService:
                 path = Path(directory) / "response.wav"
                 async with client.audio.speech.with_streaming_response.create(
                     model="gpt-4o-mini-tts", voice=voice, input=text,
-                    instructions=STYLE, response_format="pcm",
+                    instructions=STYLE, speed=speed, response_format="pcm",
                 ) as response:
                     with wave.open(str(path), "wb") as output:
                         output.setnchannels(1)

@@ -85,8 +85,16 @@ Avoid choosing a loopback/monitor source when you intend to use a microphone.
   and practicing, but microphone input pauses while ADA speaks or reference
   sound plays to avoid hearing itself. During those pauses use the Stop button.
 - **Speak responses** enables OpenAI AI-generated speech (`gpt-4o-mini-tts`),
-  initially using `marin` with a warm, patient-teacher style. Choose another voice
-  from **Voice**, or choose **System (local)** for the original offline voice.
+  initially using `cedar` at 0.95× speed with conversational delivery, clear note
+  names and short pauses between instructions. Choose another voice from
+  **Voice**, or choose **System (local)** for the original offline voice.
+  **Speaking speed** adjusts cloud voices from 0.75× to 1.15×. **Preview voice**
+  reads the same short piano instruction with your chosen voice and speed without
+  sending a chat question or enabling automatic spoken replies. It pauses the
+  microphone while speaking, and Stop cancels it. Preview is unavailable during
+  practice, reference playback or an active chat request. Voice and speed choices
+  apply for this session. Music notation such as `C#4` is spoken as “C sharp four”;
+  the displayed reply retains its original notation.
   Cloud speech uses the same session/API environment key as chat, sends reply
   text to OpenAI, and incurs a separate speech API charge. It is disabled by
   default. Chat still uses the Responses API; speech uses the Audio speech API,
