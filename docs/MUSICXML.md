@@ -30,8 +30,8 @@ with `demo` and `practice`; JSON does not support measure selection.
 
 The range is read in written order. Unsupported features outside the
 range do not block it. Repeat markings/endings inside it still do. Division
-settings are inherited from earlier measures. Earlier transposition, octave
-shifts or measure-repeat declarations are conservatively rejected because they
+settings are inherited from earlier measures. Earlier transposition
+or measure-repeat declarations are conservatively rejected because they
 may affect the excerpt. A range starting inside a repeat ending is rejected.
 Ranges cutting through a tie are rejected with instructions to extend the range.
 Selecting a range does not implement repeat playback or rhythm grading.
@@ -55,11 +55,16 @@ Supported: partwise scores, title, integer MIDI pitches, chords, multiple voices
 and staves, rests, ties, selection of one part and optional staff/voice filters,
 XML namespaces and compressed rootfile containers.
 Rejected: grace/cue/unpitched notes, microtones,
-repeats/endings/playback jumps, transposition, octave shifts, and timewise scores.
+repeats/endings/playback jumps, transposition, and timewise scores.
 Export an unfolded concert-pitch score without these features. This is not
 a complete MusicXML schema validator. PDFs can now be converted through the
 [Audiveris import/review workflow](SCORE_IMPORT.md). Direct photo import is not
 implemented. Recognition output must still pass these parser checks.
+
+Octave-shift markings (8va/8vb) are accepted. MusicXML stores the performed
+octave in each note's pitch; the marking changes its printed placement only.
+Playback uses the stored pitch without applying a second octave shift, including
+when a selected passage starts after the marking.
 
 XML is parsed locally without fetching external DTDs or extracting ZIP members
 to disk. Entity declarations and documents over 16 MiB are rejected.

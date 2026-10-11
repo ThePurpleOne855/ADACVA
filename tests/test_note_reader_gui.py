@@ -104,12 +104,12 @@ class NoteReaderGuiTests(unittest.TestCase):
         self.assertTrue(self.reader.connected)
         self.assertIn("Camera 4", panel.status.get())
 
-    def load_score_preview(self, content=None):
+    def load_score_preview(self, content=None, document=None):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         folder = Path(temporary.name)
         source = folder / "melody.musicxml"
-        source.write_text(score(score_note() if content is None else content), encoding="utf-8")
+        source.write_text(document if document is not None else score(score_note() if content is None else content), encoding="utf-8")
         panel = self.window.score
         panel.importer = ScoreImporter(folder / "library")
         panel.import_file(source)
@@ -118,6 +118,31 @@ class NoteReaderGuiTests(unittest.TestCase):
         panel.preview()
         self.assertIsNotNone(panel.review, panel.status.get())
         return panel
+
+    def test_piano_part_is_preferred_over_rest_only_voice(self):
+        document = score('<note><rest/><duration>1</duration></note>')
+        document = document.replace('<part-name>Piano</part-name>', '<part-name>Voice</part-name>')
+        document = document.replace('</part-list>', '<score-part id="P2"><part-name>Piano</part-name></score-part></part-list>')
+        document = document.replace('</score-partwise>', '<part id="P2"><measure number="1">' + score_note() + '</measure></part></score-partwise>')
+        panel = self.load_score_preview(document=document)
+        self.assertEqual(panel._selected_part()['id'], 'P2')
+        self.assertEqual(panel.review.exercise.notes, (60,))
+
+    def test_whole_piece_selects_all_measures_and_both_hands(self):
+        from test_musicxml import measures
+        upper = score_note(extra='<voice>1</voice><staff>1</staff>')
+        lower = '<backup><duration>1</duration></backup>' + score_note('E', extra='<voice>2</voice><staff>2</staff>')
+        panel = self.load_score_preview(document=measures(*([upper + lower] * 6)))
+        self.assertEqual(panel.last.get(), '4')
+        panel.confirmed.set(True)
+        panel.approve()
+        panel.preview_whole()
+        self.assertIsNone(panel.loaded)
+        self.assertFalse(panel.confirmed.get())
+        self.assertEqual((panel.first.get(), panel.last.get(), panel.staff.get(), panel.voice.get()), ('1', '6', '', ''))
+        self.assertIsNotNone(panel.review, panel.status.get())
+        self.assertEqual(len(panel.review.exercise.events), 6)
+        self.assertTrue(all(event.pitches == (60, 64) for event in panel.review.exercise.events))
 
     def test_repeat_preview_and_mode_change_invalidates_approval(self):
         panel = self.load_score_preview('<barline><repeat direction="forward"/></barline>' + score_note())

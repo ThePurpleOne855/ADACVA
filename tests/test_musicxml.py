@@ -45,6 +45,10 @@ class MusicXMLTests(unittest.TestCase):
         content='<attributes><key><fifths>1</fifths></key></attributes>'
         self.assertEqual(self.load(score(content+note("F", alter='<alter>1</alter>'))).notes, (66,))
 
+    def test_rest_only_selection_explains_how_to_choose_playable_notes(self):
+        with self.assertRaisesRegex(ValueError, 'only rests.*Choose another part'):
+            self.load(score('<note><rest/><duration>1</duration></note>'))
+
     def test_written_order_reads_repeats_and_endings_once(self):
         xml = measures('<barline><repeat direction="forward"/></barline>' + note(),
                        '<barline><ending number="1" type="start"/></barline>' + note('D'),
@@ -151,9 +155,19 @@ class MusicXMLTests(unittest.TestCase):
         xml=measures('<attributes><divisions>2</divisions></attributes>'+note(),content)
         with self.assertRaisesRegex(ValueError,'Overlapping'):
             self.load(xml,start_measure=2,voice='1')
-        for tag in ['<transpose><chromatic>2</chromatic></transpose>','<octave-shift type="up"/>']:
+        for tag in ['<transpose><chromatic>2</chromatic></transpose>']:
             with self.subTest(tag=tag),self.assertRaisesRegex(ValueError,'inherited'):
                 self.load(measures('<attributes>'+tag+'</attributes>'+note(),note()),start_measure=2)
+
+    def test_octave_shift_uses_stored_performed_pitch_without_double_shift(self):
+        for direction, octave in [('down', 6), ('up', 2)]:
+            with self.subTest(direction=direction):
+                start = f'<direction><direction-type><octave-shift type="{direction}" size="8"/></direction-type><staff>1</staff></direction>'
+                stop = '<direction><direction-type><octave-shift type="stop" size="8"/></direction-type><staff>1</staff></direction>'
+                xml = measures(start + note(octave=octave), note('D', octave=octave), stop + note('E'))
+                expected = (octave + 1) * 12
+                self.assertEqual(self.load(xml).notes, (expected, expected + 2, 64))
+                self.assertEqual(self.load(xml, start_measure=2, end_measure=2).notes, (expected + 2,))
 
     def test_range_does_not_silently_cut_ties(self):
         xml=measures(note(extra='<tie type="start"/>'),note(extra='<tie type="stop"/>'))

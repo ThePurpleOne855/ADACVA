@@ -75,6 +75,8 @@ class ScorePanel(ttk.Frame):
             ttk.Entry(selection, textvariable=variable, width=width).pack(side="left")
         self.preview_button = ttk.Button(selection, text="Preview passage", command=self.preview, state="disabled")
         self.preview_button.pack(side="left", padx=6)
+        self.whole_button = ttk.Button(selection, text="Whole piece", command=self.preview_whole, state="disabled")
+        self.whole_button.pack(side="left")
         options = ttk.Frame(self)
         options.grid(row=4, column=0, sticky="ew")
         ttk.Checkbutton(options, text="Play written measures once (ignore repeats and ending signs)",
@@ -100,7 +102,7 @@ class ScorePanel(ttk.Frame):
         ttk.Button(approval, text="Approve & load", command=self.approve).pack(side="left", padx=4)
         actions = ttk.Frame(self)
         actions.grid(row=7, column=0, sticky="ew", pady=3)
-        self.play_button = ttk.Button(actions, text="Play approved passage", command=self.play, state="disabled")
+        self.play_button = ttk.Button(actions, text="Play approved selection", command=self.play, state="disabled")
         self.play_button.pack(side="left")
         self.practice_button = ttk.Button(actions, text="Start practice", command=self.practice, state="disabled")
         self.practice_button.pack(side="left", padx=4)
@@ -173,6 +175,7 @@ class ScorePanel(ttk.Frame):
             self.part.set("")
             self.part_selector["values"] = ()
             self.preview_button.configure(state="disabled")
+            self.whole_button.configure(state="disabled")
             self.output.set("")
             self.file_selector["values"] = ()
             self._folder = self._source = self._handled = None
@@ -185,13 +188,17 @@ class ScorePanel(ttk.Frame):
     def select_output(self, event=None):
         self._invalidate()
         self.preview_button.configure(state="disabled")
+        self.whole_button.configure(state="disabled")
         try:
             path = self._outputs[self.output.get()]
             self._parts = score_parts(path)
             self.part_selector["values"] = tuple(f"{p['id']} — {p['name']}" for p in self._parts)
-            self.part.set(self.part_selector["values"][0])
+            preferred = next((i for i, part in enumerate(self._parts)
+                              if "piano" in part["name"].casefold()), 0)
+            self.part.set(self.part_selector["values"][preferred])
             self.select_part()
             self.preview_button.configure(state="normal")
+            self.whole_button.configure(state="normal")
         except Exception as exc:
             self.status.set(f"Cannot read score: {exc}")
 
@@ -208,6 +215,18 @@ class ScorePanel(ttk.Frame):
         if not 0 <= index < len(self._parts):
             raise ValueError("Select a score part first.")
         return self._parts[index]
+
+    def preview_whole(self):
+        """Preview every measure and both hands of the selected score part."""
+        try:
+            part = self._selected_part()
+            self.first.set("1")
+            self.last.set(str(part["measures"]))
+            self.staff.set("")
+            self.voice.set("")
+            self.preview()
+        except Exception as exc:
+            self.status.set(f"Cannot preview whole piece: {exc}")
 
     def preview(self):
         if self.output.get() not in self._outputs:

@@ -32,6 +32,12 @@ Reference events and simulated Demo notes are not graded as learner input.
 Starting another reference pauses practice; explicitly start a new practice
 attempt after listening. Disconnecting MIDI stops practice.
 
+To play an entire score part, click **Whole piece** after loading MusicXML. This
+previews all measures, staves and voices of the selected part (both piano hands).
+Check the preview, **Approve & load**, then **Play approved selection**. Other
+instrument parts are not combined. Unsupported notation still blocks import;
+the current playback limits remain 4096 notes and five minutes at the chosen tempo.
+
 **Play written measures once** is enabled by default: repeat signs and alternate
 endings do not block preview, and every selected measure is practiced once in
 printed order. This does not expand repeats or choose between alternate endings.

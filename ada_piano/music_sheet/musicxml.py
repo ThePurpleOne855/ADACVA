@@ -77,7 +77,7 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
     # Earlier pitch-changing state can persist into the excerpt. Conservatively
     # reject it rather than silently importing the wrong sounding pitches.
     for earlier in prefix:
-        for tag in ("transpose", "octave-shift", "measure-repeat"):
+        for tag in ("transpose", "measure-repeat"):
             if earlier.find(f".//{tag}") is not None:
                 raise ValueError(f"Unsupported inherited MusicXML feature: {tag} before the selected range.")
     active_ending = False
@@ -86,7 +86,10 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
             active_ending = ending.get("type") == "start"
     if active_ending and not written_order:
         raise ValueError("Selected range starts inside an unsupported repeat ending.")
-    for tag in ("repeat", "ending", "transpose", "octave-shift", "measure-repeat"):
+    # MusicXML octave-shift changes notation placement, not the stored pitch.
+    # <pitch>/<octave> already represents the performed octave. Applying another
+    # shift here would transpose the notes twice, including in excerpts.
+    for tag in ("repeat", "ending", "transpose", "measure-repeat"):
         if written_order and tag in {"repeat", "ending"}:
             continue
         if any(m.find(f".//{tag}") is not None for m in measures):
@@ -213,7 +216,9 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
     if active_ties:
         raise ValueError("Score or selected range ends with an unclosed tie; extend the end to include its release.")
     if not spans:
-        raise ValueError("No playable notes in the selected part/staff/voice.")
+        raise ValueError("No playable notes in the selected part/staff/voice and measure range. "
+                         "This selection may contain only rests. Choose another part (such as Piano), "
+                         "staff/voice, or measure range.")
     title = root.findtext("movement-title") or root.findtext("./work/work-title") or path.stem
     title = title.strip() or path.stem
     if written_order:
