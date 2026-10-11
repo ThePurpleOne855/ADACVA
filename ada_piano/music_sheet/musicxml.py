@@ -52,7 +52,7 @@ def _read(path: Path) -> ET.Element:
 
 
 def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
-                  start_measure=None, end_measure=None) -> Exercise:
+                  start_measure=None, end_measure=None, written_order=False) -> Exercise:
     root = _read(path)
     if root.tag != "score-partwise":
         raise ValueError("Only score-partwise MusicXML is supported; export a partwise score.")
@@ -84,9 +84,11 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
     for earlier in prefix:
         for ending in earlier.iter("ending"):
             active_ending = ending.get("type") == "start"
-    if active_ending:
+    if active_ending and not written_order:
         raise ValueError("Selected range starts inside an unsupported repeat ending.")
     for tag in ("repeat", "ending", "transpose", "octave-shift", "measure-repeat"):
+        if written_order and tag in {"repeat", "ending"}:
+            continue
         if any(m.find(f".//{tag}") is not None for m in measures):
             raise ValueError(f"Unsupported MusicXML feature: {tag}. Export an unfolded, concert-pitch practice line.")
     for sound in (s for m in measures for s in m.iter("sound")):
@@ -214,6 +216,8 @@ def load_musicxml(path: Path, *, part=None, staff=None, voice=None,
         raise ValueError("No playable notes in the selected part/staff/voice.")
     title = root.findtext("movement-title") or root.findtext("./work/work-title") or path.stem
     title = title.strip() or path.stem
+    if written_order:
+        title += " — written order, repeats/endings played once"
     if start_measure is not None or end_measure is not None:
         first_label, last_label = measures[0].get("number", "?"), measures[-1].get("number", "?")
         title += f" — measure positions {start}–{end} (score labels {first_label}–{last_label})"

@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Launch Audiveris Flatpak with access to this conversion's saved files."""
+
+import os
+from pathlib import Path
+import shutil
+import sys
+
+flatpak = shutil.which("flatpak")
+if flatpak is None:
+    sys.exit("Flatpak is not installed. Install it before using this launcher.")
+
+arguments = sys.argv[1:]
+command = [flatpak, "run"]
+if "-output" in arguments:
+    position = arguments.index("-output")
+    if position + 1 == len(arguments):
+        sys.exit("The -output option needs a directory.")
+    # ScoreImporter stores source.pdf beside the output directory. Grant this
+    # one import folder rather than access to the user's entire home directory.
+    folder = Path(arguments[position + 1]).resolve().parent
+    command.append(f"--filesystem={folder}")
+command.extend(["org.audiveris.audiveris", *arguments])
+os.execv(flatpak, command)

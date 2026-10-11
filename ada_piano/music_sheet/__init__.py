@@ -1,4 +1,4 @@
-"""Structured exercises; score image recognition is outside the first prototype."""
+"""Structured exercises; local PDF conversion is handled by score_import."""
 
 from dataclasses import dataclass
 from fractions import Fraction
@@ -71,15 +71,17 @@ class Exercise:
 
 def load_exercise(path: Path, *, part: str | None = None,
                   staff: str | None = None, voice: str | None = None,
-                  start_measure: int | None = None, end_measure: int | None = None) -> Exercise:
+                  start_measure: int | None = None, end_measure: int | None = None,
+                  written_order: bool = False) -> Exercise:
     path = Path(path)
     if path.suffix.lower() in {".xml", ".musicxml", ".mxl"}:
         from .musicxml import load_musicxml
         return load_musicxml(path, part=part, staff=staff, voice=voice,
-                             start_measure=start_measure, end_measure=end_measure)
+                             start_measure=start_measure, end_measure=end_measure,
+                             written_order=written_order)
     if path.suffix.lower() != ".json":
         raise ValueError("Use JSON, MusicXML (.musicxml/.xml), or compressed MusicXML (.mxl). PDF/image recognition is not supported.")
-    if any(value is not None for value in (part, staff, voice, start_measure, end_measure)):
+    if written_order or any(value is not None for value in (part, staff, voice, start_measure, end_measure)):
         raise ValueError("Part, staff, voice and measure selection apply only to MusicXML.")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
