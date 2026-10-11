@@ -85,6 +85,13 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(report["pitch_accuracy_percent"], 100)
         self.assertEqual(report["notes_expected"], 55)  # 49 attacks, 6 of them two-note chords
 
+    def test_fast_detached_notes_keep_their_order(self):
+        played = []
+        for i, pitch in enumerate([64, 64, 65, 67, 67, 65, 64, 62]):  # 30 ms apart, never held together
+            played.append(PlayedNote(pitch, 1 + i * 0.03, 1 + i * 0.03 + 0.02))
+        report = compare(self.ode, played)
+        self.assertEqual((report["correct"], report["wrong"]), (8, 0))
+
     def test_play_through_pairs_presses_and_releases(self):
         take = PlayThrough(1.0)
         take.observe("on", 60, 80, 1, 0.5)  # before start: ignored

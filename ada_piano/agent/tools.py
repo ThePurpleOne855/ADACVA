@@ -3,6 +3,7 @@
 from dataclasses import replace
 import math
 
+from ada_piano import pieces
 from ada_piano.music_sheet import Exercise
 from ada_piano.score_import.review import playback_notes
 
@@ -37,26 +38,40 @@ def select_passage(review, start_measure, end_measure):
 
 
 class AgentTools:
-    def __init__(self, review, summary=None, action=None):
+    def __init__(self, review, summary=None, action=None, performance=None, catalog=None):
         self.review = review
         self.summary = summary
+        self.performance = performance
         self.action = action
+        self.catalog = catalog
+
+    def _pieces(self):
+        if self.catalog is None:
+            self.catalog = pieces.catalog()
+        return self.catalog
 
     def dispatch(self, name, arguments):
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be an object.")
-        if name in {"get_current_passage", "get_attempt_summary", "stop_practice"}:
+        if name in {"get_current_passage", "get_attempt_summary", "get_performance_report",
+                    "list_pieces", "stop_practice"}:
             if arguments:
                 raise ValueError("This tool takes no arguments.")
             if name == "get_current_passage":
                 return passage_context(self.review) if self.review else {"status": "no_approved_score"}
             if name == "get_attempt_summary":
                 return self.summary or {"status": "no_attempt"}
+            if name == "get_performance_report":
+                return self.performance or {"status": "no_play_through"}
+            if name == "list_pieces":
+                return {"pieces": [piece.describe() for piece in self._pieces()]}
             return self._action(name, {})
+        if name == "load_piece":
+            return self._load_piece(arguments)
         allowed = {"start_measure", "end_measure"}
         if name == "play_reference":
             allowed |= {"tempo"}
-        elif name != "start_practice":
+        elif name not in {"start_practice", "start_play_through"}:
             raise ValueError("Unknown or forbidden tool.")
         if set(arguments) != allowed:
             raise ValueError("Unexpected or missing tool arguments.")
@@ -69,6 +84,27 @@ class AgentTools:
                 raise ValueError("Tempo must be a finite number.")
             playback_notes(exercise, tempo=tempo)  # existing safety limits
         return self._action(name, arguments)
+
+    def _load_piece(self, arguments):
+        """Only pre-checked catalog pieces; never arbitrary files or unreviewed imports."""
+        if set(arguments) != {"piece", "passage", "hands"} or not all(
+                isinstance(v, str) and len(v) <= 100 for v in arguments.values()):
+            raise ValueError("load_piece needs piece, passage and hands strings.")
+        piece = pieces.find(arguments["piece"], self._pieces())
+        if piece is None:
+            raise ValueError("Unknown piece. Call list_pieces for the available titles.")
+        passage = arguments["passage"] or "whole"
+        hands = arguments["hands"] or next(iter(piece.hands))
+        if passage not in piece.passages:
+            raise ValueError(f"Unknown passage. Choose one of: {', '.join(piece.passages)}.")
+        if hands not in piece.hands:
+            raise ValueError(f"Unsupported hands. Choose one of: {', '.join(piece.hands)}.")
+        result = dict(self._action("load_piece", {"piece": piece.id, "passage": passage, "hands": hands}))
+        review = result.pop("_review", None)
+        if review is not None:
+            # Later tools in this turn refer to the newly loaded passage.
+            self.review, self.summary, self.performance = review, None, None
+        return result
 
     def _action(self, name, arguments):
         if self.action is None:

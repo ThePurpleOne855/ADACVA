@@ -13,7 +13,7 @@ from statistics import median
 
 from ada_piano.music_sheet import Exercise, note_name
 
-CHORD_GAP = 0.06  # seconds; attacks closer than this are ordered by pitch
+CHORD_GAP = 0.06  # seconds; overlapping attacks closer than this are ordered by pitch
 MAX_EXPECTED = 2000
 MAX_PLAYED = 4000
 MAX_ITEMS = 5  # per measure and category, keeping the model context small
@@ -103,7 +103,9 @@ def _ordered(played):
     played = sorted(played, key=lambda n: n.onset)
     clusters, result = [], []
     for note in played:
-        if clusters and note.onset - clusters[-1][-1].onset <= CHORD_GAP:
+        # A chord needs keys held together; quick detached notes keep their order.
+        if (clusters and note.onset - clusters[-1][-1].onset <= CHORD_GAP
+                and all(n.release is None or n.release > note.onset for n in clusters[-1])):
             clusters[-1].append(note)
         else:
             clusters.append([note])
@@ -272,3 +274,46 @@ def compare(exercise: Exercise, played, *, target_bpm=None):
                            if box["expected"] and not any(box is b for _, b in problems)],
         "limitations": LIMITATIONS,
     }
+
+
+def describe(report):
+    """Short spoken summary of a play-through report; usable without any cloud model."""
+    reached = report["notes_reached"]
+    if not report["notes_played"] or not reached:
+        return "I didn't hear any notes from the piano. Check the MIDI connection and try again."
+    parts = [f"{report['correct']} of {reached} notes correct"]
+    if report["complete"]:
+        parts[0] = "You reached the end. " + parts[0]
+    else:
+        parts[0] = f"You stopped in measure {report['stopped_in_measure']}. " + parts[0]
+    bpm = report["tempo"]["estimated_bpm"]
+    if bpm:
+        target = report["tempo"]["target_bpm"]
+        pace = f"about {bpm} beats per minute"
+        if target and abs(bpm - target) >= max(6, 0.1 * target):
+            pace += f", target {target}"
+        parts.append(pace)
+    sentences = [", ".join(parts) + "."]
+    details = report["measure_details"]
+    if not details:
+        sentences.append("Clean play-through. Try a little faster, or the next passage.")
+        return " ".join(sentences)
+    worst = details[0]
+    issues = []
+    if worst.get("wrong"):
+        first = worst["wrong"][0]
+        issues.append(f"you played {first['played']} instead of {first['expected']}")
+    if worst.get("missed"):
+        issues.append("you missed " + " and ".join(worst["missed"][:2]))
+    if worst.get("extra"):
+        issues.append("there was an extra " + worst["extra"][0])
+    if worst.get("hesitations"):
+        issues.append("you paused")
+    if worst.get("early") and not issues:
+        issues.append("you rushed")
+    if worst.get("late") and not issues:
+        issues.append("some notes came late")
+    if worst.get("short") and not issues:
+        issues.append(worst["short"][0] + " was released too early")
+    sentences.append(f"Work on measure {worst['measure']}: " + ", ".join(issues[:2]) + ".")
+    return " ".join(sentences)

@@ -1,11 +1,14 @@
 """PDF import, text review, and approved score practice inside the piano window."""
 
 from pathlib import Path
+from time import monotonic
 import tkinter as tk
 from tkinter import filedialog, ttk
 import webbrowser
 
+from ada_piano import pieces
 from ada_piano.ai_tutor import Tutor
+from ada_piano.ai_tutor.performance import PlayThrough, compare, describe
 from ada_piano.music_sheet import note_name
 from ada_piano.sound_sensor import NoteEvent
 from .conversion import ScoreImporter, score_parts
@@ -13,8 +16,21 @@ from .review import ReviewedScore
 from ada_piano.agent.attempts import AttemptRecorder
 
 
+TAKE_SILENCE = 4.0  # seconds without keys before a play-through is scored
+
+
+def _piece_choices(catalog):
+    choices = {}
+    for piece in catalog:
+        for passage in piece.passages:
+            for hands in piece.hands:
+                label = f"{piece.title} — {passage} — {hands} hand{'s' if hands == 'both' else ''}"
+                choices[label] = (piece.id, passage, hands)
+    return choices
+
+
 class ScorePanel(ttk.Frame):
-    def __init__(self, parent, playback, connected=lambda: False, importer=None):
+    def __init__(self, parent, playback, connected=lambda: False, importer=None, catalog=None):
         super().__init__(parent, padding=8)
         self.playback = playback
         self.connected = connected
@@ -24,6 +40,16 @@ class ScorePanel(ttk.Frame):
         self.tutor = None
         self.attempt = None
         self.latest_attempt = None
+        self.take = None
+        self.take_exercise = None
+        self.take_context = None
+        self.take_tempo = None
+        self.latest_performance = None
+        self.announce = None  # optional callable(text) that speaks status for blind learners
+        self.catalog = pieces.catalog() if catalog is None else catalog
+        self._choices = _piece_choices(self.catalog)
+        self.choice = tk.StringVar(value=next(iter(self._choices), ""))
+        self.show_import = tk.BooleanVar(value=False)
         self.activity_version = 0
         self._closed = False
         self._handled = None
@@ -45,21 +71,36 @@ class ScorePanel(ttk.Frame):
         self.feedback = tk.StringVar(value="Review and approve a passage to enable playback and practice.")
         self.path_label = tk.StringVar(value="No score loaded")
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(5, weight=1)
+        self.rowconfigure(2, weight=1)
 
-        tools = ttk.Frame(self)
+        quick = ttk.LabelFrame(self, text="Practice a checked piece (or say \"ADA, practice Für Elise\")", padding=6)
+        quick.grid(row=0, column=0, sticky="ew")
+        self.piece_selector = ttk.Combobox(quick, textvariable=self.choice, values=tuple(self._choices),
+                                           state="readonly", width=48)
+        self.piece_selector.pack(side="left", fill="x", expand=True)
+        ttk.Button(quick, text="Load piece", command=self.load_choice).pack(side="left", padx=4)
+        self.take_button = ttk.Button(quick, text="Record play-through (F5)", command=self.play_through, state="disabled")
+        self.take_button.pack(side="left")
+        ttk.Checkbutton(self, text="Show tools to import a new PDF or MusicXML (needs a sighted check)",
+                        variable=self.show_import, command=self._toggle_import).grid(row=1, column=0, sticky="w", pady=3)
+        body = self.import_tools = ttk.Frame(self)
+        body.grid(row=2, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(5, weight=1)
+
+        tools = ttk.Frame(body)
         tools.grid(row=0, column=0, sticky="ew")
         self.choose_button = ttk.Button(tools, text="Choose PDF / MusicXML", command=self.choose)
         self.choose_button.pack(side="left")
         ttk.Button(tools, text="Cancel conversion", command=self.importer.cancel).pack(side="left", padx=4)
         ttk.Button(tools, text="Open source", command=self.open_source).pack(side="left", padx=4)
         ttk.Button(tools, text="Diagnostics", command=self.diagnostics).pack(side="left")
-        settings = ttk.Frame(self)
+        settings = ttk.Frame(body)
         settings.grid(row=1, column=0, sticky="ew", pady=3)
         self.converter_label = tk.StringVar(value="Converter: automatic Audiveris detection")
         ttk.Label(settings, textvariable=self.converter_label).pack(side="left", fill="x", expand=True)
         ttk.Button(settings, text="Advanced converter settings", command=self.converter_settings).pack(side="left")
-        files = ttk.Frame(self)
+        files = ttk.Frame(body)
         files.grid(row=2, column=0, sticky="ew")
         ttk.Label(files, text="Available score:").pack(side="left")
         self.file_selector = ttk.Combobox(files, textvariable=self.output, state="readonly")
@@ -67,7 +108,7 @@ class ScorePanel(ttk.Frame):
         self.file_selector.bind("<<ComboboxSelected>>", self.select_output)
         self.progress = ttk.Progressbar(files, mode="indeterminate", length=100)
         self.progress.pack(side="left")
-        selection = ttk.Frame(self)
+        selection = ttk.Frame(body)
         selection.grid(row=3, column=0, sticky="ew", pady=3)
         ttk.Label(selection, text="Part:").pack(side="left")
         self.part_selector = ttk.Combobox(selection, textvariable=self.part, state="readonly", width=18)
@@ -81,13 +122,13 @@ class ScorePanel(ttk.Frame):
         self.preview_button.pack(side="left", padx=6)
         self.whole_button = ttk.Button(selection, text="Whole piece", command=self.preview_whole, state="disabled")
         self.whole_button.pack(side="left")
-        options = ttk.Frame(self)
+        options = ttk.Frame(body)
         options.grid(row=4, column=0, sticky="ew")
         ttk.Checkbutton(options, text="Play written measures once (ignore repeats and ending signs)",
                         variable=self.written_order).pack(anchor="w")
         ttk.Label(options, text="Staff/voice blank = all. From/to = measure positions. Fixed tempo; pedal, dynamics and fingering ignored.",
                   wraplength=820).pack(anchor="w")
-        table = ttk.Frame(self)
+        table = ttk.Frame(body)
         table.grid(row=5, column=0, sticky="nsew", pady=4)
         self.table = ttk.Treeview(table, columns=("measure", "beat", "notes", "duration", "line"),
                                   show="headings", height=3)
@@ -99,35 +140,127 @@ class ScorePanel(ttk.Frame):
         self.table.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         self.table.pack(fill="both", expand=True)
-        approval = ttk.Frame(self)
+        approval = ttk.Frame(body)
         approval.grid(row=6, column=0, sticky="ew")
         ttk.Checkbutton(approval, text="I checked this passage against the source", variable=self.confirmed,
                         command=self._confirmation_changed).pack(side="left")
         ttk.Button(approval, text="Approve & load", command=self.approve).pack(side="left", padx=4)
-        actions = ttk.Frame(self)
+        actions = ttk.Frame(body)
         actions.grid(row=7, column=0, sticky="ew", pady=3)
         self.play_button = ttk.Button(actions, text="Play approved selection", command=self.play, state="disabled")
         self.play_button.pack(side="left")
         self.practice_button = ttk.Button(actions, text="Start practice", command=self.practice, state="disabled")
         self.practice_button.pack(side="left", padx=4)
         ttk.Button(actions, text="Stop practice / sound", command=self.stop).pack(side="left")
-        ttk.Label(self, textvariable=self.feedback, wraplength=820).grid(row=8, column=0, sticky="w")
-        ttk.Label(self, textvariable=self.status, wraplength=820).grid(row=9, column=0, sticky="w")
-        ttk.Label(self, textvariable=self.path_label, wraplength=820).grid(row=10, column=0, sticky="w")
+        ttk.Label(self, textvariable=self.feedback, wraplength=820).grid(row=3, column=0, sticky="w")
+        ttk.Label(self, textvariable=self.status, wraplength=820).grid(row=4, column=0, sticky="w")
+        ttk.Label(self, textvariable=self.path_label, wraplength=820).grid(row=5, column=0, sticky="w")
+        self._toggle_import()
         for variable in (self.part, self.staff, self.voice, self.first, self.last, self.written_order):
             variable.trace_add("write", self._invalidate)
         self._timer = self.after(150, self._poll)
+
+    def _toggle_import(self):
+        if self.show_import.get():
+            self.import_tools.grid()
+        else:
+            self.import_tools.grid_remove()
+
+    def _say(self, text):
+        self.feedback.set(text)
+        if self.announce is not None:
+            self.announce(text)
+
+    def _set_loaded(self, review):
+        self.loaded = review
+        state = "normal" if review is not None else "disabled"
+        for button in (self.play_button, self.practice_button, self.take_button):
+            button.configure(state=state)
+
+    def load_choice(self):
+        if self.choice.get() in self._choices:
+            try:
+                self.load_piece(*self._choices[self.choice.get()])
+            except ValueError as exc:
+                self._say(str(exc))
+
+    def load_piece(self, name, passage=None, hands=None):
+        """Load a pre-checked catalog passage; no visual review needed. Returns a description."""
+        piece = pieces.find(name, self.catalog)
+        if piece is None:
+            raise ValueError("I don't know that piece. Available: " + ", ".join(p.title for p in self.catalog) + ".")
+        passage = passage or "whole"
+        review = pieces.load(piece, passage, hands)
+        self._invalidate()
+        self.review = review
+        self.take_tempo = piece.default_tempo
+        self._set_loaded(review)
+        self.path_label.set(f"Loaded from the checked library: {piece.file.name}")
+        hand_text = "both hands" if review.piece["hands"] == "both" else f"{review.piece['hands']} hand"
+        text = (f"Loaded {piece.title}, {piece.passages[passage][2]}, {hand_text}. "
+                "Press F5 or say \"ADA, record\", then play. Stop for four seconds when you finish.")
+        self.status.set("Ready. " + text)
+        self._say(text)
+        return {"status": "loaded", "piece": piece.id, "title": piece.title, "passage": passage,
+                "hands": review.piece["hands"], "default_tempo": piece.default_tempo}
+
+    def play_through(self, exercise=None, context=None, tempo=None):
+        """Record an uninterrupted performance, then compare it with the score."""
+        self.activity_version += 1
+        if self.loaded is None:
+            self._say("Load a piece first. For example, say \"ADA, practice Ode to Joy\".")
+            return False
+        if not self.connected():
+            self._say("The piano is not connected. Check the USB MIDI cable. Demo input is not graded.")
+            return False
+        if self.playback.player.status.state == "playing":
+            self._say("Wait for the reference to finish before recording.")
+            return False
+        self.stop_practice()
+        self.take = PlayThrough(monotonic())
+        self.take_exercise = exercise if exercise is not None else self.loaded.exercise
+        self.take_context = context if context is not None else self.loaded.context()
+        if tempo is not None:
+            self.take_tempo = tempo
+        self._say("Recording. Play when ready. Stop for four seconds when you finish.")
+        return True
+
+    def finish_take(self):
+        """Score the current play-through; returns the report, or None if nothing was played."""
+        take, self.take = self.take, None
+        if take is None:
+            return None
+        take.finish(monotonic())
+        if not take.notes:
+            self._say("Recording stopped. I didn't hear any notes.")
+            return None
+        report = compare(self.take_exercise, take.notes, target_bpm=self.take_tempo)
+        context = self.take_context
+        self.latest_performance = {
+            "score_sha256": context["sha256"], "selection": context["selection"],
+            "title": context["title"], "report": report, "feedback": []}
+        self.activity_version += 1
+        self._say(describe(report))
+        return report
+
+    def performance_summary(self):
+        """Latest report for the currently loaded passage only."""
+        latest = self.latest_performance
+        if latest is None or self.loaded is None:
+            return None
+        if latest["score_sha256"] != self.loaded.digest or latest["selection"] != self.loaded.selection:
+            return None
+        return latest["report"]
 
     def _invalidate(self, *args):
         self.activity_version += 1
         self.stop_practice()
         if self.loaded is not None:
             self.playback.stop()
-        self.review = self.loaded = self.tutor = None
+        self.review = self.tutor = None
+        self._set_loaded(None)
         self._following_playback = False
         self.confirmed.set(False)
-        self.play_button.configure(state="disabled")
-        self.practice_button.configure(state="disabled")
         children = self.table.get_children()
         if children:
             self.table.delete(*children)
@@ -136,10 +269,9 @@ class ScorePanel(ttk.Frame):
     def _confirmation_changed(self):
         if not self.confirmed.get():
             self.stop_practice()
-            self.loaded = self.tutor = None
+            self.tutor = None
+            self._set_loaded(None)
             self.playback.stop()
-            self.play_button.configure(state="disabled")
-            self.practice_button.configure(state="disabled")
 
     def choose_executable(self):
         path = filedialog.askopenfilename(parent=self, title="Select the Audiveris application — not your PDF")
@@ -268,15 +400,13 @@ class ScorePanel(ttk.Frame):
                 raise ValueError("Preview the passage and confirm you checked it against the source first.")
             self.review.approve()
             saved = self.review.save(self._folder)
-            self.loaded = self.review
-            self.play_button.configure(state="normal")
-            self.practice_button.configure(state="normal")
+            self.take_tempo = None
+            self._set_loaded(self.review)
             self.status.set(f"Approved and loaded. Structured exercise saved: {saved}")
             self.feedback.set("Ready. Select MIDI output and tempo in Piano & Camera → Audible reference, or start pitch practice.")
         except Exception as exc:
-            self.loaded = self.tutor = None
-            self.play_button.configure(state="disabled")
-            self.practice_button.configure(state="disabled")
+            self.tutor = None
+            self._set_loaded(None)
             self.status.set(f"Cannot load: {exc}")
 
     def play(self):
@@ -306,6 +436,11 @@ class ScorePanel(ttk.Frame):
 
     def stop_practice(self):
         self.activity_version += 1
+        if self.take is not None:
+            if self.take.notes:
+                self.finish_take()
+            else:
+                self.take = None
         if self.attempt is not None:
             self.attempt.finish()
             self.latest_attempt = self.attempt
@@ -322,6 +457,9 @@ class ScorePanel(ttk.Frame):
         self.feedback.set("Practice stopped.")
 
     def observe(self, event, source):
+        if self.take is not None and source == "Piano":
+            self.take.observe(event.kind, event.note, event.velocity, event.channel, event.timestamp)
+            return
         if self.tutor is None or source != "Piano":
             return
         if self.playback.player.status.state == "playing":
@@ -374,6 +512,11 @@ class ScorePanel(ttk.Frame):
                     self.file_selector["values"] = tuple(self._outputs)
                     self.output.set(next(iter(self._outputs)))
                     self.select_output()
+            if self.take is not None and self.take.idle_for(monotonic()) >= TAKE_SILENCE:
+                self.finish_take()
+            if self.take is not None and self.playback.player.status.state == "playing":
+                self.take = None
+                self._say("Reference playing, so recording stopped.")
             if self.tutor is not None and self.playback.player.status.state == "playing":
                 self.stop_practice()
                 self.feedback.set("Reference playing. Start practice again when it finishes.")

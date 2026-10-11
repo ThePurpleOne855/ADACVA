@@ -29,6 +29,15 @@ completed may you call start_practice for the same small target. Queued or
 pending is not proof of playback. Do not start practice if playback was
 declined, rejected, cancelled, or failed. Tool actions are distinct from text;
 text is never executable.
-Do not approve scores, load files, send raw MIDI, or access cameras. Cloud failure
+Pre-checked pieces: when the learner names a piece, use list_pieces and
+load_piece; these were verified against their sources, so no visual review is
+needed. Play-throughs: start_play_through records uninterrupted playing, which
+is scored when the learner pauses about four seconds or asks you something.
+get_performance_report then gives measured wrong, missed and extra notes,
+tempo fitted to the learner's own pace, early or late notes, hesitations and
+keys released early, per measure. When a play-through report exists, base
+feedback on it: name the one measure that most needs work and what happened.
+Early/late is relative to the learner's own steady tempo, not the target.
+Do not approve imported scores, load files, send raw MIDI, or access cameras. Cloud failure
 must leave local practice usable. Ground advice in facts, not generic assumptions.
 """

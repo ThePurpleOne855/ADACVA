@@ -1,5 +1,6 @@
 """Combined piano reader, reference playback, and optional camera preview."""
 
+import os
 from time import monotonic
 from types import SimpleNamespace
 import tkinter as tk
@@ -16,8 +17,9 @@ from ada_piano.agent.gui import CoachPanel
 
 class NoteReaderWindow:
     def __init__(self, root: tk.Tk, reader=None, demo=False, player=None, camera_worker=None,
-                 agent_client=None, voice=None):
+                 agent_client=None, voice=None, accessible=False):
         self.root = root
+        self.accessible = accessible
         self.reader = reader if reader is not None else NoteReader()
         self.demo = False
         self._demo_step = 0
@@ -90,6 +92,16 @@ class NoteReaderWindow:
         ttk.Label(frame, textvariable=self.score.feedback, wraplength=840).pack(anchor="w", pady=4)
         self._started = monotonic()
         self.selector.focus_set()
+        for key, action in (("<F1>", self.talk), ("<F2>", self.toggle_import), ("<F5>", self.record),
+                            ("<F6>", self.results), ("<Escape>", self.stop_all)):
+            root.bind(key, lambda event, action=action: action() or "break")
+        if accessible:
+            if not voice and not os.environ.get("OPENAI_API_KEY"):
+                self.coach.voice_choice.set("System (local)")
+                self.coach._voice_changed()
+            self.coach.speak.set(True)
+            self.workspace.select(self.coach)
+            self.coach.entry.focus_set()
         if demo:
             self.start_demo()
         else:
@@ -98,7 +110,44 @@ class NoteReaderWindow:
             candidates = self._instrument_ports(self.selector["values"])
             if len(candidates) == 1:
                 self.connect()
+        if accessible:
+            piano = "The piano is connected." if self.reader.connected else (
+                "The piano is not connected yet. Plug in the USB MIDI cable; I'll keep checking.")
+            self._announce(f"ADA piano teacher ready. {piano} Press F1 to talk, or type and press Enter. "
+                           "Say help to hear the commands.")
+        self._next_scan = monotonic() + 3
         self._timer = root.after(20, self._tick)
+
+    def _announce(self, text):
+        if self.accessible:
+            self.coach.announce(text)
+
+    def talk(self):
+        self.workspace.select(self.coach)
+        if self.coach.microphone.available:
+            self.coach.listen()
+        else:
+            self.coach.entry.focus_set()
+            self._announce("Type your message and press Enter.")
+
+    def toggle_import(self):
+        self.score.show_import.set(not self.score.show_import.get())
+        self.score._toggle_import()
+        self.workspace.select(self.score)
+
+    def record(self):
+        self.coach.stop()
+        self.score.play_through()
+
+    def results(self):
+        self.workspace.select(self.coach)
+        self.coach.text.set("How did I do?")
+        self.coach.ask()
+
+    def stop_all(self):
+        self.coach.stop()
+        self.playback.stop()
+        self._announce("Stopped.")
 
     def _show_state(self):
         state = self.reader.state
@@ -131,6 +180,7 @@ class NoteReaderWindow:
         return [port for port in ports if "midi through" not in port.lower()]
 
     def _error(self, exc):
+        was_connected = self.reader.connected
         self.score.stop_practice()
         self.demo = False
         try:
@@ -142,6 +192,8 @@ class NoteReaderWindow:
         self._last_played = None
         self.details.set("MIDI —   Velocity —   Channel —")
         self._show_state()
+        if was_connected:
+            self._announce("The piano was disconnected. Check the USB MIDI cable; I'll reconnect when it's back.")
 
     def refresh(self):
         try:
@@ -166,6 +218,7 @@ class NoteReaderWindow:
             self.latest.set("Play a note")
             self.details.set("MIDI —   Velocity —   Channel —")
             self.status.set(f"Listening: {self.reader.port_name}")
+            self._announce("Piano connected.")
             self._check_due = monotonic() + 2
             self._show_state()
         except Exception as exc:
@@ -238,6 +291,13 @@ class NoteReaderWindow:
                     if event is not None:
                         self._record(event, source="Demo")
                     self._demo_due = now + 0.4
+            elif self.accessible and not self.reader.connected and now >= self._next_scan:
+                self._next_scan = now + 3
+                candidates = self._instrument_ports(self.reader.list_ports())
+                if len(candidates) == 1:
+                    self.refresh()
+                    self.port.set(candidates[0])
+                    self.connect()
             elif self.reader.connected:
                 if now >= self._check_due:
                     self.reader.check_connection()
@@ -283,7 +343,7 @@ def launch(demo=False):
         root = tk.Tk()
     except tk.TclError as exc:
         raise RuntimeError("Note Reader needs a graphical desktop. Run it from a desktop terminal.") from exc
-    window = NoteReaderWindow(root, demo=demo)
+    window = NoteReaderWindow(root, demo=demo, accessible=True)
     try:
         root.mainloop()
     finally:

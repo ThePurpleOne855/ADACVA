@@ -60,7 +60,7 @@ class AgentGuiTests(unittest.TestCase):
                 release.wait(2)
                 return answer("Stale response")
         panel = self.prepare(Slow())
-        panel.text.set("Help")
+        panel.text.set("Give me a practice tip")
         panel.ask()
         self.assertTrue(started.wait(1))
         ticks = []
@@ -80,7 +80,7 @@ class AgentGuiTests(unittest.TestCase):
                 raise OSError("private error should not appear")
         panel = self.prepare(Broken())
         review = self.window.score.loaded
-        panel.text.set("Help")
+        panel.text.set("Give me a practice tip")
         panel.ask()
         self.run_gui(150)
         self.assertIn("unavailable", panel.transcript.get("1.0", "end"))
@@ -93,7 +93,7 @@ class AgentGuiTests(unittest.TestCase):
         panel = self.prepare(FakeClient([]))
         review = self.window.score.loaded
         self.window.score.loaded = None
-        panel.text.set("Help")
+        panel.text.set("Give me a practice tip")
         panel.ask()
         self.assertIn("No approved", panel.transcript.get("1.0", "end"))
         result = panel._perform(review, "start_practice", {"start_measure": "6", "end_measure": "6"})

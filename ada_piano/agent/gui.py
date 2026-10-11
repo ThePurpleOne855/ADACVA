@@ -7,7 +7,10 @@ from threading import Event, Thread
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from ada_piano import pieces
+from ada_piano.ai_tutor.performance import describe
 from ada_piano.voice import VoiceService
+from . import local_commands
 from .coach import Coach, error_message
 from .cloud_voice import CloudVoiceService, VOICES
 from .session import ChatSession
@@ -46,6 +49,10 @@ class CoachPanel(ttk.Frame):
         self._reference_outcome = None
         self._reference_waiter = None
         self._request_playback_status = None
+        self._request = None
+        self.local_commands = hasattr(self.score, "load_piece")
+        if self.local_commands and getattr(self.score, "announce", None) is None:
+            self.score.announce = self.announce
         self.text = tk.StringVar()
         self.speak = tk.BooleanVar(value=False)
         self.hands_free = tk.BooleanVar(value=False)
@@ -156,6 +163,70 @@ class CoachPanel(ttk.Frame):
         self._speech_done = self.voice.say(text)
         return self._speech_done
 
+    def announce(self, text):
+        """Show and (when enabled) speak a local status message."""
+        self._append("ADA", text)
+        self.status.set(text)
+        if self.speak.get() and not self._closed:
+            self._say(text)
+
+    def _api_configured(self):
+        return bool(self.client or self._api_key or os.environ.get("OPENAI_API_KEY"))
+
+    def _local(self, question):
+        """Handle offline commands; returns True when handled locally."""
+        command = local_commands.parse(question, self.score.catalog)
+        if command is None:
+            return False
+        name, arguments = command
+        if name == "results" and getattr(self.score, "take", None) is None and self._api_configured():
+            return False  # the coach can explain the measured report in more depth
+        self._append("You", question)
+        self.text.set("")
+        if name == "stop":
+            self.stop()
+            self.announce("Stopped.")
+        elif name == "help":
+            self.announce(local_commands.HELP)
+        elif name == "list":
+            self.announce(local_commands.list_text(self.score.catalog))
+        elif name == "load":
+            self.stop()
+            try:
+                self.score.load_piece(arguments["piece"], arguments["passage"], arguments["hands"])
+            except ValueError as exc:
+                self.announce(str(exc))
+        elif name == "record":
+            self.voice.stop()
+            self.score.play_through()
+        elif name == "results":
+            if getattr(self.score, "take", None) is not None:
+                self.score.finish_take()
+            else:
+                report = self.score.performance_summary()
+                self.announce(describe(report) if report else
+                              "No play-through yet for this passage. Say: ADA, record. Then play.")
+        elif name == "reference":
+            self._local_reference()
+        return True
+
+    def _local_reference(self):
+        review = self.score.loaded
+        if review is None:
+            self.announce("Load a piece first. Say: ADA, list pieces.")
+            return
+        self.stop()
+        tempo = self.score.take_tempo or self.score.playback.tempo.get()
+        announcement = "Listen. Then it's your turn."
+        self._append("ADA", announcement)
+        if self.speak.get():
+            finished = self._say(announcement)
+        else:
+            finished = Event()
+            finished.set()
+        self._activity_version = self.score.activity_version
+        self._pending_reference = (review, review.exercise, tempo, finished)
+
     def _voice_changed(self, event=None):
         if self._injected_voice:
             return
@@ -242,6 +313,10 @@ class CoachPanel(ttk.Frame):
         question = self.text.get().strip()
         if not question:
             return
+        if self.local_commands and self._local(question):
+            return
+        if getattr(self.score, "take", None) is not None:
+            self.score.finish_take()  # "ADA, ..." right after playing scores the take first
         if self.score.tutor is not None or self.score.playback.player.status.state == "playing":
             self.status.set("Stop practice / sound before asking ADA, so speech does not overlap.")
             return
@@ -262,8 +337,10 @@ class CoachPanel(ttk.Frame):
         if summary and (summary["score_sha256"] != review.digest or
                         any(attempt.context["selection"].get(k) != v for k, v in review.selection.items())):
             summary = None
+        performance = self.score.performance_summary() if hasattr(self.score, "performance_summary") else None
         snapshot = deepcopy(review)
         token = self._cancel = Event()
+        request = self._request = {"review": review}
         self._request_review = review
         self._request_context_active = True
         self._request_attempt = attempt if summary else None
@@ -277,20 +354,21 @@ class CoachPanel(ttk.Frame):
 
         def action(name, arguments):
             done, box = Event(), {}
-            self._queue.put(("action", token, (review, name, arguments, done, box)))
+            self._queue.put(("action", token, (request["review"], name, arguments, done, box)))
             while not done.wait(.05):
                 if token.is_set():
                     return {"status": "cancelled"}
             return box["result"]
 
-        tools = AgentTools(snapshot, summary, action)
+        tools = AgentTools(snapshot, summary, action, performance,
+                           self.score.catalog if hasattr(self.score, "catalog") else None)
         coach = Coach(tools, self.client, api_key=self._api_key, model=self._model)
         coach.history = list(self._history)
 
         def run():
             try:
                 answer = coach.ask(question, token)
-                self._queue.put(("answer", token, (review, answer, coach.history)))
+                self._queue.put(("answer", token, (request["review"], answer, coach.history)))
             except Exception as exc:
                 # Avoid leaking SDK errors, credentials or remote payloads into UI/logs.
                 self._queue.put(("error", token, error_message(exc)))
@@ -300,6 +378,8 @@ class CoachPanel(ttk.Frame):
         self._thread.start()
 
     def _perform(self, review, name, arguments):
+        if name == "load_piece":
+            return self._perform_load(arguments)
         if review is None or self.score.loaded is not review or not review.approved:
             return {"status": "rejected", "reason": "Approved selection changed or is not loaded."}
         if self._request_stale():
@@ -344,15 +424,46 @@ class CoachPanel(ttk.Frame):
         for index, event in enumerate(context["events"]):
             event["approved_event_index"] = event["event_index"]
             event["event_index"] = index
+        mode = "record" if name == "start_play_through" else "practice"
         if (self._pending_reference is not None or self._reference_active
                 or (self._turn_ready is not None and not self._turn_ready.is_set())):
-            self._pending_practice = (review, exercise, context)
+            self._pending_practice = (review, exercise, context, mode)
             return {"status": "queued_after_reference"}
         self.voice.stop()
-        self.score.practice(exercise, context)
+        return self._begin(exercise, context, mode)
+
+    def _begin(self, exercise, context, mode):
+        if mode == "record":
+            started = self.score.play_through(exercise, context)
+        else:
+            self.score.practice(exercise, context)
+            started = self.score.tutor is not None
         self._activity_version = self.score.activity_version
         self.status.set(self.score.feedback.get())
-        return {"status": "practicing" if self.score.tutor is not None else "unavailable"}
+        return {"status": ("recording" if mode == "record" else "practicing") if started else "unavailable"}
+
+    def _perform_load(self, arguments):
+        if not hasattr(self.score, "load_piece"):
+            return {"status": "unavailable"}
+        if self.score.playback.player.status.state == "playing":
+            return {"status": "rejected", "reason": "Reference sound is playing."}
+        if self._reference_waiter is not None:
+            self._finish_reference("cancelled")
+        self._reference_outcome = None  # a new passage starts with no reference history
+        self._pending_reference = self._pending_practice = None
+        self._reference_active = False
+        try:
+            result = self.score.load_piece(arguments["piece"], arguments["passage"], arguments["hands"])
+        except ValueError as exc:
+            return {"status": "rejected", "reason": str(exc)}
+        # This request now refers to the new passage rather than being cancelled as stale.
+        self._request_review = self.score.loaded
+        if self._request is not None:
+            self._request["review"] = self.score.loaded
+        self._request_attempt = None
+        self._activity_version = self.score.activity_version
+        self._request_playback_status = self.score.playback.player.status
+        return {**result, "_review": deepcopy(self.score.loaded)}
 
     def _poll(self):
         if self._request_stale():
@@ -445,12 +556,10 @@ class CoachPanel(ttk.Frame):
                         self._turn_ready = self._say("Your turn.")
         if (self._pending_practice and not self._reference_active and self._pending_reference is None
                 and (self._turn_ready is None or self._turn_ready.is_set())):
-            review, exercise, context = self._pending_practice
+            review, exercise, context, *mode = self._pending_practice
             self._pending_practice = None
             if self.score.loaded is review:
-                self.score.practice(exercise, context)
-                self._activity_version = self.score.activity_version
-                self.status.set(self.score.feedback.get())
+                self._begin(exercise, context, mode[0] if mode else "practice")
 
     def _request_stale(self):
         """Only compare versions captured by this request, never stop newer work."""
