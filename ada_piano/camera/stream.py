@@ -6,15 +6,31 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from time import monotonic_ns
 
+from ada_piano.camera.source import CameraSource, parse_camera_source
+
+
+@dataclass(frozen=True)
+class HandLandmark:
+    """MediaPipe normalized image coordinates, independent of GUI objects."""
+
+    x: float
+    y: float
+    z: float
+
 
 @dataclass(frozen=True)
 class CameraFrame:
     ppm: bytes
     hands: int
     bgr: object = None
+    # Host acquisition time just after read(), not sensor exposure time.
+    # Same monotonic clock as MIDI timestamps (convert ns to seconds).
+    captured_at_ns: int | None = None
+    hand_landmarks: tuple[tuple[HandLandmark, ...], ...] = ()
 
 
-def camera_frames(index, stop):
+def camera_frames(source: CameraSource, stop: Event):
+    source = parse_camera_source(source)
     try:
         import cv2
         import mediapipe as mp
@@ -35,21 +51,23 @@ def camera_frames(index, stop):
         with mp.tasks.vision.HandLandmarker.create_from_options(options) as tracker:
             if stop.is_set():
                 return
-            camera = cv2.VideoCapture(index)
+            camera = cv2.VideoCapture(source)
             if not camera.isOpened():
-                raise RuntimeError(f"Cannot open camera {index}. Check permissions or try another index.")
+                raise RuntimeError(f"Cannot open camera source {source}. Check permissions or try another source.")
             previous_timestamp = -1
             while not stop.is_set():
                 ok, frame = camera.read()
+                captured_at_ns = monotonic_ns()
                 if not ok:
-                    raise RuntimeError("Camera stopped delivering frames. Reconnect it and start again.")
-                frame = cv2.flip(frame, 1)
+                    raise RuntimeError(f"Camera source {source} stopped delivering frames. Reconnect it and start again.")
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                timestamp = max(previous_timestamp + 1, monotonic_ns() // 1_000_000)
+                timestamp = max(previous_timestamp + 1, captured_at_ns // 1_000_000)
                 previous_timestamp = timestamp
                 result = tracker.detect_for_video(
                     mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), timestamp,
                 )
+                landmarks = tuple(tuple(HandLandmark(point.x, point.y, point.z)
+                                        for point in hand) for hand in result.hand_landmarks)
                 for hand in result.hand_landmarks:
                     draw_hand(frame, hand)
                 # Fit both dimensions, including portrait cameras, into the panel.
@@ -59,7 +77,7 @@ def camera_frames(index, stop):
                 preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
                 h, w = preview.shape[:2]
                 ppm = f"P6\n{w} {h}\n255\n".encode() + preview.tobytes()
-                yield CameraFrame(ppm, len(result.hand_landmarks), frame)
+                yield CameraFrame(ppm, len(landmarks), frame, captured_at_ns, landmarks)
     finally:
         if camera is not None:
             camera.release()
@@ -78,19 +96,20 @@ class CameraWorker:
     def running(self):
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, index=0):
+    def start(self, source: CameraSource = 0):
         if self.running:
             raise RuntimeError("Camera is still running or stopping. Wait before restarting.")
+        source = parse_camera_source(source)
         self._stop.clear()
         with self._lock:
             self._frame = None
             self._status = "Starting camera…"
-        self._thread = Thread(target=self._run, args=(index,), daemon=True)
+        self._thread = Thread(target=self._run, args=(source,), daemon=True)
         self._thread.start()
 
-    def _run(self, index):
+    def _run(self, source):
         try:
-            with closing(self._source(index, self._stop)) as frames:
+            with closing(self._source(source, self._stop)) as frames:
                 for frame in frames:
                     if self._stop.is_set():
                         break

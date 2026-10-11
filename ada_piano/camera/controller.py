@@ -1,5 +1,7 @@
 """Switch cameras only after the previous capture worker releases its resources."""
 
+from ada_piano.camera.source import parse_camera_source
+
 
 class CameraController:
     def __init__(self, worker):
@@ -7,24 +9,25 @@ class CameraController:
         self.pending = None
         self.active = None
 
-    def start(self, index):
+    def start(self, source):
+        source = parse_camera_source(source)
         if self.worker.running:
-            if index == self.active and self.pending is None:
+            if source == self.active and self.pending is None:
                 return
-            self.pending = index
+            self.pending = source
             self.worker.stop()
         else:
             self.pending = None
-            self.worker.start(index)
-            self.active = index
+            self.worker.start(source)
+            self.active = source
 
     def snapshot(self):
         if self.pending is not None:
             if self.worker.running:
                 return None, f"Switching to camera {self.pending}… waiting for the previous camera to stop."
-            index, self.pending = self.pending, None
-            self.worker.start(index)
-            self.active = index
+            source, self.pending = self.pending, None
+            self.worker.start(source)
+            self.active = source
         frame, status = self.worker.snapshot()
         if self.active is not None:
             status = f"Camera {self.active}: {status}"
