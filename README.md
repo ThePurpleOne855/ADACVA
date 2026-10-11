@@ -124,6 +124,9 @@ a separate strictly increasing millisecond timestamp derived from acquisition
 time. Camera observations are not proof of a key press: MIDI remains authoritative
 for actual note events. No keyboard calibration or fingering grading is added.
 
+For landmark logging, still-photo checks, CyberTrack H4 notes and the printable
+overhead mount (`mount/webcam_adapter.scad`), see [docs/CAMERA.md](docs/CAMERA.md).
+
 ### Using an iPhone as the camera
 
 ADACVA does not communicate directly with iOS. First expose the iPhone to the
