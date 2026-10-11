@@ -6,7 +6,7 @@ Target experience: import a PDF or MusicXML score, review the recognized music, 
 
 Live YPT-300 input through the mioXC is user-confirmed. Note Reader displays a virtual keyboard, velocity, channel, sustain, and note history. The duration column measures press to release. Automated tests cover the reader, desktop GUI, and audible-reference engine. Timing for input currently uses GUI polling timestamps and is approximate.
 
-Music Sheet loads JSON pitch sequences; the tutor checks the next pitch without timed score alignment. A standalone MediaPipe script tracks finger joints, but is not calibrated to piano keys or integrated with the tutor. PDF recognition, MusicXML import, saved practice sessions, language-model feedback, and calibrated hand guidance remain to be implemented.
+Music Sheet loads JSON and MusicXML (including compressed MXL), preserving timed attack groups, chords, rests, and ties with part/staff/voice and measure selection. The tutor supports held-key chord matching, but does not grade rhythm. A standalone MediaPipe script tracks finger joints, but is not calibrated to piano keys or integrated with the tutor. PDF recognition, the MusicXML-to-playback adapter, saved practice sessions, language-model feedback, and calibrated hand guidance remain to be implemented.
 
 ## Implementation stages
 
@@ -70,7 +70,7 @@ Next session, in priority order:
 
 1. **Confirm audible output (1–2 minutes).** In Audible reference, select mioXC and play `C4 E4 G4`; confirm the Yamaha speakers sound all three notes.
 2. **Trial PDF recognition (30–60 minutes, plus installation if needed).** Check/install Audiveris, convert the supplied PDF, retain diagnostics, and review a short passage against the source.
-3. **Implement MusicXML import (4–8 hours including review controls).** Preserve score timing, parts, chords, rests, and ties; feed one reviewed passage to the playback API.
+3. **Connect existing MusicXML import to playback (2–4 hours initially).** Use `Exercise.events` and per-tone durations, preserve chords/rests/ties, and add review controls for one short passage. MusicXML import and held-key chord practice arrived from GitHub main during integration; avoid duplicating them.
 4. **Add session recording (2–4 hours initially).** Capture MIDI arrival timestamps independently of GUI polling, persist metadata/events, and mark Listen versus Your turn intervals before scoring attempts.
 5. **Continue comparison, camera calibration, and AI integration.** Follow the stage estimates above; keep feedback grounded in recorded, aligned observations.
 

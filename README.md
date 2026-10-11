@@ -1,6 +1,18 @@
 # ADA Piano Teacher
 
+MusicXML import is available for single-note and chord pitch practice. See
+[importing existing sheet music](docs/MUSICXML.md) for supported files and limits.
+
 Accessible Piano Learning Assistant: a Python hackathon prototype for blind and visually impaired learners.
+
+## Automated checks
+
+GitHub Actions runs the tests on pull requests and pushes to `main`, using
+Python 3.11 and 3.12 on Windows and Linux. It also checks installation, the CLI,
+and the packaged exercise files. Only the core package is installed; physical
+camera, MIDI and speech-device checks still need local testing. Before merging,
+check that all four jobs in the PR's Checks tab are green. Requiring these
+checks before merge is a separate repository branch-protection setting.
 
 ## Start here (2 minutes once dependencies are available)
 
@@ -117,22 +129,22 @@ Typed callers can use `play_notes([PlaybackNote(...)], port_name=..., tempo=...)
 
 Playback uses a separate worker and monotonic deadlines. Its bounded event buffer includes actual send timestamps, releases, and `source="reference"`; `status` reports completion, cancellation, or failure. On output failure, cleanup attempts releases before closing the port; a disconnected cable cannot deliver those releases to the instrument. Stop/error handling does not depend on an AI response.
 
-The score importer and AI adapter are not implemented yet. The playback API currently supports fixed-tempo note plans (including chords/rests), not raw MusicXML or score pedal/tempo-change instructions; importers should merge tied notes before submitting a plan. Future scoring should use distinct **Listen** and **Your turn** intervals so incoming echoes or playing during a demonstration are not treated as an assessed attempt.
+MusicXML import is available for pitch/chord practice; its playback adapter and the AI adapter are not implemented yet. The playback API currently supports fixed-tempo note plans (including chords/rests), not raw MusicXML or score pedal/tempo-change instructions; importers should merge tied notes before submitting a plan. Future scoring should use distinct **Listen** and **Your turn** intervals so incoming echoes or playing during a demonstration are not treated as an assessed attempt.
 
 ## Understand the modules
 
 | Module | What works now | Later |
 | --- | --- | --- |
 | `ada_piano/camera` | Independent timed webcam capture check, optional preview | MediaPipe hand landmarks, keyboard calibration |
-| `ada_piano/music_sheet` | Validated JSON exercise → ordered MIDI notes | MusicXML import; scanned score recognition is stretch work |
+| `ada_piano/music_sheet` | JSON/MusicXML → timed attack groups, chords, rests; measure selection | Repeat playback; scanned score recognition is stretch work |
 | `ada_piano/sound_sensor` | Simulated notes, real MIDI input, independent monitor | Optional microphone input and pitch estimation |
 | `ada_piano/note_reader` | Independent MIDI GUI, virtual keyboard, velocity/channel, sustain, simulated demo; live YPT-300 input confirmed | Accessibility validation |
 | `ada_piano/playback` | Audible reference GUI and reusable validated MIDI note-plan API, chords/rests, tempo, cancellation | MusicXML/AI adapters, score tempo changes and pedal phrasing |
-| `ada_piano/ai_tutor` | Compare the next note, correct higher/lower, optional speech | Hand-position context and AI-generated explanations |
+| `ada_piano/ai_tutor` | Single-note/chord practice, held-key matching, optional speech | Rhythm grading, hand-position context |
 
 Music Sheet supplies the expected notes. Sound sensor supplies played notes. Tutor compares them, advances only on a correct note, and sends text or speech feedback. Camera is deliberately tested separately before it contributes hand-position observations.
 
-The current tutor is rule based, not an AI model. It evaluates single notes in sequence, not timing, chords, fingering, or posture. MIDI captures note events, not audio. The camera check does not yet detect hands. Speech currently blocks while each prompt is spoken: use slow, one-note-at-a-time practice. Continuous real-time feedback needs a bounded speech queue and handling for notes received during speech.
+The current tutor is rule based, not an AI model. It evaluates pitches and chord attacks, not rhythmic accuracy, fingering, or posture. MIDI captures key presses and releases, not audio. Chord notes must be held together and pressed within 150 ms by default (`--chord-window-ms` changes this). This is a finger-timing tolerance, not tempo grading. The camera check does not yet detect hands. Speech blocks the feedback loop; MIDI events are timestamped and queued by the input callback during speech. Use slow practice until live hardware and speech latency are validated.
 
 ## Test each part separately
 
@@ -161,6 +173,13 @@ uv run python -m ada_piano demo --exercise my_exercise.json --notes 60 62 64
 ```
 
 Each note is an integer from 0–127; this project names MIDI 60 as C4 (middle C). At least one note is required. Sharps are spelled out in feedback for speech.
+
+For chords, use a nested list such as `"notes": [[60, 64, 67], [62, 65, 69]]`.
+Try the included example without hardware:
+
+```sh
+python -m ada_piano demo --exercise ada_piano/exercises/two_chords.json --chords 60+64+67 62+65+69
+```
 
 See [PLAN.md](PLAN.md) for the delivery order and acceptance checks.
 
