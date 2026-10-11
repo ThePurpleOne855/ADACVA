@@ -3,9 +3,9 @@
 Export a score as MusicXML (`.musicxml`, `.xml`, or compressed `.mxl`), then:
 
 ```powershell
-python -m ada_piano sheet --exercise song.musicxml
-python -m ada_piano demo --exercise ada_piano/exercises/five_notes.musicxml --notes 60 62 64 65 67
-python -m ada_piano practice --exercise song.mxl --part P1 --staff 1 --voice 1 --port "YOUR MIDI INPUT" --speak
+uv run --locked --all-extras python -m ada_piano sheet --exercise song.musicxml
+uv run --locked --all-extras python -m ada_piano demo --exercise ada_piano/exercises/five_notes.musicxml --notes 60 62 64 65 67
+uv run --locked --all-extras python -m ada_piano practice --exercise song.mxl --part P1 --staff 1 --voice 1 --port "YOUR MIDI INPUT" --speak
 ```
 
 Use `sheet` first to inspect the imported sequence. Multi-part scores require
@@ -18,7 +18,7 @@ at the same score position become one group, including notes across both staves.
 ## Practice a measure range
 
 ```powershell
-python -m ada_piano sheet --exercise "C:/Users/X/Downloads/Moonlight Sonata - Ivory.mxl" --part P1 --staff 1 --voice 1 --start-measure 1 --end-measure 4
+uv run --locked --all-extras python -m ada_piano sheet --exercise "C:/Users/X/Downloads/Moonlight Sonata - Ivory.mxl" --part P1 --staff 1 --voice 1 --start-measure 1 --end-measure 4
 ```
 
 Both endpoints are inclusive **one-based positions in the selected part**, not
@@ -74,8 +74,8 @@ to disk. Entity declarations and documents over 16 MiB are rejected.
 For both staves of the opening Moonlight excerpt:
 
 ```powershell
-python -m ada_piano sheet --exercise "C:/Users/X/Downloads/Moonlight Sonata - Ivory.mxl" --part P1 --start-measure 1 --end-measure 4
-python -m ada_piano practice --exercise "C:/Users/X/Downloads/Moonlight Sonata - Ivory.mxl" --part P1 --start-measure 1 --end-measure 4 --port "YOUR MIDI INPUT" --chord-window-ms 150
+uv run --locked --all-extras python -m ada_piano sheet --exercise "C:/Users/X/Downloads/Moonlight Sonata - Ivory.mxl" --part P1 --start-measure 1 --end-measure 4
+uv run --locked --all-extras python -m ada_piano practice --exercise "C:/Users/X/Downloads/Moonlight Sonata - Ivory.mxl" --part P1 --start-measure 1 --end-measure 4 --port "YOUR MIDI INPUT" --chord-window-ms 150
 ```
 
 The tutor waits for all pitches in each attack group to be held. Notes must be

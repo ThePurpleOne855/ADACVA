@@ -4,13 +4,13 @@ ADA can answer general piano questions without starting MIDI, camera, score
 import, Audiveris or the deterministic tutor:
 
 ```sh
-uv run --extra agent python -m ada_piano.agent
+uv run --locked --extra agent python -m ada_piano.agent
 ```
 
-From an already installed Windows virtual environment:
+Use the same uv command in Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\python.exe -m ada_piano.agent
+uv run --locked --extra agent python -m ada_piano.agent
 ```
 
 The same controls are also available in the combined Note Reader's ADA Coach
@@ -27,6 +27,17 @@ the initial model, defaulting to `gpt-4.1-mini`. Settings are kept in memory;
 keys are never saved to a file or included in the transcript. The application
 does not read Codex's credentials or automatically load a `.env` file.
 
+For a persistent local key, store `OPENAI_API_KEY` in the Git-ignored `.env`
+file and have uv load it explicitly (on Linux, restrict that file with
+`chmod 600 .env`). Never paste a real key into tracked files or documentation.
+
+```sh
+uv run --locked --all-extras --env-file .env python -m ada_piano note-reader
+```
+
+For standalone chat, replace `ada_piano note-reader` with `ada_piano.agent`.
+Replace a key shared in chat with a new key in the local `.env` file.
+
 Press **Ask ADA** or Enter after typing into **Your message**. Sending a question
 uses the OpenAI API and requires API account credit. A ChatGPT subscription does
 not supply API credit. Errors distinguish missing/rejected keys, permissions,
@@ -42,9 +53,25 @@ shown if it fails. The GUI stays responsive during requests.
 ## Microphone and activation
 
 Windows uses installed English `System.Speech` dictation with the default
-microphone. There are no new Python packages and no audio-upload service.
-Other operating systems retain text chat and existing speech output; native
-microphone recognition is not implemented there yet.
+microphone; its recognition stays local. Linux uses PipeWire `pw-record`, or
+ALSA `arecord`, and the existing OpenAI SDK to transcribe short audio clips with
+`gpt-4o-mini-transcribe`. Linux listening sends audio to OpenAI and incurs API
+charges. It starts only when you enable a microphone control. macOS retains text
+chat and speech output; microphone recognition is not implemented there yet.
+
+On Linux, choose **Speak responses** and **Hands-free: say “ADA …”** to converse.
+Say “ADA, how do I find middle C?” and pause for about one second. Each recording
+is capped at 12 seconds; silence and short clicks are discarded locally. The
+energy gate is not a dedicated speech detector: use a quiet room and a headset.
+In hands-free mode, recorded speech is transcribed before the ADA prefix is
+checked, so background speech may be uploaded even if it does not trigger a reply.
+Recordings are held in memory, not written to disk. Stop cancels recording and
+pending transcription; cancelled requests may already have incurred charges.
+
+PipeWire uses your default source unless `ADA_MIC_TARGET` names a source from
+`wpctl status` / `wpctl inspect`. ALSA uses `default`, or `ADA_ALSA_DEVICE`.
+Put these optional settings in `.env` and launch with `--env-file .env`.
+Avoid choosing a loopback/monitor source when you intend to use a microphone.
 
 - **Speak a question** listens for one utterance, for up to 12 seconds. Check
   the recognized text in the message box, then press **Ask ADA** to send it.
@@ -63,13 +90,14 @@ microphone recognition is not implemented there yet.
   Cloud speech uses the same session/API environment key as chat, sends reply
   text to OpenAI, and incurs a separate speech API charge. It is disabled by
   default. Chat still uses the Responses API; speech uses the Audio speech API,
-  not a new chat or Realtime conversation. The microphone stays local.
+  not a new chat or Realtime conversation. Windows recognition stays local;
+  Linux recognition uses the transcription API.
   Typed chat remains
   usable when either microphone recognition or speech output is unavailable.
 
-Low-confidence results are discarded. The microphone starts only when enabled,
-stops on Stop/window close, and has a visible status. Audio is not saved or sent
-to OpenAI by this service. In hands-free mode the recognized question text is
+Low-confidence Windows results are discarded. The microphone starts only when enabled,
+stops on Stop/window close, and has a visible status. Windows audio is not uploaded;
+Linux audio is sent for transcription as described above. In hands-free mode the recognized question text is
 sent through the usual coach request. The microphone subprocess does not inherit
 `OPENAI_API_KEY`. Allow desktop microphone access in Windows yourself if needed,
 select the correct default recording device, and install English speech
@@ -80,7 +108,7 @@ Speech requests and WAV playback run outside Tk. Stop/window close cancels them,
 discards stale speech and removes temporary WAV files. A cancelled API request
 may already have incurred a charge. Replies over 4096 characters stay in text
 instead of being truncated or triggering multiple paid speech requests.
-Windows uses native WAV playback; macOS needs `afplay`, Linux needs `aplay`.
+Windows uses native WAV playback; macOS needs `afplay`, Linux uses `pw-play` or `aplay`.
 No new Python dependency was added. Voice selection is session-only. Successful
 cloud audio playback still requires a live API account and speakers.
 The speech endpoint supplies raw PCM; ADA finalizes a mono 24kHz/16-bit WAV
@@ -91,11 +119,16 @@ Implementation follows the [official OpenAI speech guide](https://developers.ope
 ## Verification
 
 ```sh
-python -m unittest ada_piano.agent.test_input ada_piano.agent.test_reliability ada_piano.agent.test_cloud_voice -v
-python -m unittest discover -s tests -q
+uv run --locked --all-extras python -m unittest ada_piano.agent.test_input -v
+uv run --locked --all-extras python -m unittest ada_piano.agent.test_reliability -v
+uv run --locked --all-extras python -m unittest ada_piano.agent.test_cloud_voice -v
+uv run --locked --all-extras python -m unittest ada_piano.agent.test_linux_speech -v
+uv run --locked --all-extras python -m unittest discover -s tests -q
 ```
 
 The added tests are inside this module to keep edits within `ada_piano/agent/`.
-Existing GitHub test discovery does not automatically run them. They exercise
+GitHub CI runs these module tests explicitly alongside the main test suite.
+Run the modules in separate processes: combining Tk input tests and worker-thread
+tests can trigger a Tcl thread-cleanup crash on Linux. They exercise
 fake recognition/model responses and real desktop Tk when available. Microphone
 accuracy, speakers and a live API account still require a local trial.

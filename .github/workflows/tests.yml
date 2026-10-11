@@ -29,15 +29,26 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
+          version: '0.12.5'
           python-version: ${{ matrix.python }}
+          enable-cache: true
       - name: Install core package
-        run: python -m pip install .
+        run: uv sync --locked --no-editable
       - name: Run unit and integration tests
-        run: python -m unittest discover -s tests -v
+        run: uv run --no-sync python -m unittest discover -s tests -v
+      # Keep Tk input tests separate from tests that start worker threads.
+      - name: Run agent input tests
+        run: uv run --no-sync python -m unittest ada_piano.agent.test_input -v
+      - name: Run agent reliability tests
+        run: uv run --no-sync python -m unittest ada_piano.agent.test_reliability -v
+      - name: Run cloud voice tests
+        run: uv run --no-sync python -m unittest ada_piano.agent.test_cloud_voice -v
+      - name: Run Linux voice tests
+        run: uv run --no-sync python -m unittest ada_piano.agent.test_linux_speech -v
       - name: Check installed CLI and packaged exercises
         working-directory: ${{ runner.temp }}
         run: |
-          ada-piano demo
-          python -c "from importlib.resources import files; from ada_piano.music_sheet import load_exercise; from pathlib import Path; p = Path(str(files('ada_piano').joinpath('exercises/five_notes.musicxml'))); assert load_exercise(p).notes == (60, 62, 64, 65, 67)"
+          uv run --no-sync --project "${{ github.workspace }}" ada-piano demo
+          uv run --no-sync --project "${{ github.workspace }}" python -c "from importlib.resources import files; from ada_piano.music_sheet import load_exercise; from pathlib import Path; p = Path(str(files('ada_piano').joinpath('exercises/five_notes.musicxml'))); assert load_exercise(p).notes == (60, 62, 64, 65, 67)"

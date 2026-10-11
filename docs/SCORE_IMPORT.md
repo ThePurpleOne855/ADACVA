@@ -5,7 +5,7 @@
 From the project root:
 
 ```sh
-uv run --extra camera --extra midi python -m ada_piano note-reader
+uv run --locked --extra camera --extra midi python -m ada_piano note-reader
 ```
 
 Choose the top-level **Scores · import & practice** tab. Use the **Piano & Camera**

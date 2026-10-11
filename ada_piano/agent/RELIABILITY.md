@@ -18,8 +18,8 @@ supplied as evidence, never an unrelated newer attempt.
 Run both commands (the second is the existing full suite):
 
 ```sh
-python -m unittest ada_piano.agent.test_reliability -v
-python -m unittest discover -s tests -q
+uv run --locked --all-extras python -m unittest ada_piano.agent.test_reliability -v
+uv run --locked --all-extras python -m unittest discover -s tests -q
 ```
 
 The regressions are colocated here to keep every change within `ada_piano/agent/`.

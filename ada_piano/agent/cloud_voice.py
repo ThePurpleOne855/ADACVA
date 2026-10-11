@@ -25,7 +25,8 @@ def playback_command(path):
                   "$sound=New-Object System.Media.SoundPlayer($env:ADA_SPEECH_WAV); "
                   "try { $sound.PlaySync() } finally { $sound.Dispose() }")
         return [engine, "-NoProfile", "-NonInteractive", "-Command", script] if engine else None
-    engine = shutil.which("afplay" if sys.platform == "darwin" else "aplay")
+    engine = (shutil.which("afplay") if sys.platform == "darwin" else
+              (shutil.which("pw-play") or shutil.which("aplay")))
     return [engine, str(path)] if engine else None
 
 

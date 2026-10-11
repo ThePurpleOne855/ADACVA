@@ -11,7 +11,7 @@ from ada_piano.voice import VoiceService
 from .coach import Coach, error_message
 from .cloud_voice import CloudVoiceService, VOICES
 from .session import ChatSession
-from .speech_input import SpeechInput, voice_command
+from .speech_input import create_speech_input, voice_command
 from .tools import AgentTools, passage_context, select_passage
 
 
@@ -22,7 +22,7 @@ class CoachPanel(ttk.Frame):
         self.client = client
         self.voice = voice if voice is not None else CloudVoiceService()
         self._injected_voice = voice is not None
-        self.microphone = microphone if microphone is not None else SpeechInput()
+        self.microphone = microphone if microphone is not None else create_speech_input()
         self._api_key = None
         self._model = os.environ.get("ADA_OPENAI_MODEL", "gpt-4.1-mini")
         self._request_context_active = False
@@ -89,6 +89,9 @@ class CoachPanel(ttk.Frame):
         ttk.Button(settings, text="API settings", command=self.api_settings).pack(side="left")
         ttk.Label(settings, textvariable=self.connection, wraplength=600).pack(side="left", padx=8)
         ttk.Label(bottom, textvariable=self.microphone_status, wraplength=950).pack(anchor="w")
+        if getattr(self.microphone, "cloud_transcription", False):
+            ttk.Label(bottom, text="Linux voice input sends recorded audio to OpenAI when listening is enabled (API charges apply).",
+                      wraplength=950).pack(anchor="w")
         ttk.Label(bottom, textvariable=self.status, wraplength=950).pack(anchor="w")
         history = ttk.Frame(self)
         history.pack(fill="both", expand=True)
@@ -127,6 +130,8 @@ class CoachPanel(ttk.Frame):
             if not selected or len(selected) > 100:
                 return
             self._api_key = key.get().strip() or None
+            if hasattr(self.microphone, "configure"):
+                self.microphone.configure(api_key=self._api_key)
             self._model = selected
             key.set("")
             self._history = []
@@ -174,6 +179,8 @@ class CoachPanel(ttk.Frame):
         self._listen_pending = False
         self.microphone.stop()
         self.voice.stop()
+        if self.hands_free.get() and not self.microphone.available:
+            self.microphone.start(continuous=True, retry=True)
         self._poll_microphone()
 
     def _microphone_busy(self):

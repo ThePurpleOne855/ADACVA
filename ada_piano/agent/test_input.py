@@ -161,6 +161,7 @@ class StandaloneGuiTests(unittest.TestCase):
         self.assertIn("Start with middle C", self.panel.transcript.get("1.0", "end"))
 
     def test_settings_and_labelled_input_present(self):
+        self.microphone.configure = Mock()
         self.assertIn("API key:", self.panel.connection.get())
         self.assertEqual(self.panel.entry.cget("textvariable"), str(self.panel.text))
         self.panel.api_settings()
@@ -174,6 +175,7 @@ class StandaloneGuiTests(unittest.TestCase):
         apply = next(c for c in dialog.winfo_children()[0].winfo_children() if c.winfo_class() == "TButton")
         apply.invoke()
         self.assertEqual(self.panel._api_key, "private-session-key")
+        self.microphone.configure.assert_called_once_with(api_key="private-session-key")
         self.assertEqual(self.panel._model, "chosen-model")
         self.assertNotIn("private-session-key", self.panel.connection.get())
 

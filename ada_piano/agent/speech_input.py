@@ -9,6 +9,13 @@ from collections import deque
 from threading import Lock, Thread
 
 
+def create_speech_input():
+    if sys.platform.startswith("linux"):
+        from .linux_speech_input import LinuxSpeechInput
+        return LinuxSpeechInput()
+    return SpeechInput()
+
+
 SCRIPT = r"""
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
