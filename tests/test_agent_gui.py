@@ -95,7 +95,7 @@ class AgentGuiTests(unittest.TestCase):
         self.window.score.loaded = None
         panel.text.set("Give me a practice tip")
         panel.ask()
-        self.assertIn("No approved", panel.transcript.get("1.0", "end"))
+        self.assertIn("No piece is loaded", panel.transcript.get("1.0", "end"))
         result = panel._perform(review, "start_practice", {"start_measure": "6", "end_measure": "6"})
         self.assertEqual(result["status"], "rejected")
 

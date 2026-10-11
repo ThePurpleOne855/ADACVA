@@ -404,7 +404,7 @@ class CoachPanel(ttk.Frame):
         self.voice.stop()
         review = self.score.loaded
         if review is None:
-            self._append("ADA", "No approved passage is loaded. I can answer general piano questions; approve a score for guided practice.")
+            self._append("ADA", "No piece is loaded yet. Say a piece name to practice it, or ask me anything about piano.")
         identity = (review.digest, repr(review.selection)) if review else None
         if identity != self._identity:
             self._history = []

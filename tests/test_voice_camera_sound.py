@@ -208,3 +208,20 @@ class MicrophoneChoiceTests(unittest.TestCase):
         for _ in range(20):
             utterance.feed(constant)
         self.assertFalse(utterance.frames)
+
+
+class SavedKeyTests(unittest.TestCase):
+    def test_saved_key_loads_unless_environment_has_one(self):
+        from ada_piano.agent.settings import load_api_key
+        path = Path(tempfile.mkdtemp()) / "openai_api_key"
+        path.write_text("sk-test\n")
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertTrue(load_api_key(path))
+            import os
+            self.assertEqual(os.environ["OPENAI_API_KEY"], "sk-test")
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}, clear=True):
+            load_api_key(path)
+            import os
+            self.assertEqual(os.environ["OPENAI_API_KEY"], "sk-env")
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertFalse(load_api_key(path.with_name("missing")))

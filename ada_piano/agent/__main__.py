@@ -5,6 +5,8 @@ from .gui import CoachPanel
 
 
 def main():
+    from .settings import load_api_key
+    load_api_key()
     root = tk.Tk()
     root.title("ADA Coach — standalone chat")
     root.geometry("1000x650")

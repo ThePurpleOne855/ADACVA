@@ -391,6 +391,8 @@ class NoteReaderWindow:
 
 
 def launch(demo=False):
+    from ada_piano.agent.settings import load_api_key
+    load_api_key()
     try:
         root = tk.Tk()
     except tk.TclError as exc:
