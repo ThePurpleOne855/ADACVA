@@ -23,7 +23,8 @@ SOUND_TOOLS = {"play_reference", "play_notes", "replay_my_playing"}
 
 
 class CoachPanel(ttk.Frame):
-    def __init__(self, parent, score=None, *, client=None, voice=None, microphone=None):
+    def __init__(self, parent, score=None, *, client=None, voice=None, microphone=None,
+                 controls=None, on_message=None):
         super().__init__(parent, padding=10)
         self.score = score if score is not None else ChatSession()
         self.client = client
@@ -55,6 +56,11 @@ class CoachPanel(ttk.Frame):
         self._request_playback_status = None
         self._request = None
         self.camera = None  # optional callable(on=True) -> spoken status, set by the main window
+        self.controls = controls
+        self.on_message = on_message
+        self._last_message = "ADA is ready. Say help to hear the available commands."
+        self._microphone_mode = None
+        self._input_notice = None
         self.conversation = False  # accessible mode: auto-send speech and listen again after replies
         self._listen_next = False
         self.local_commands = hasattr(self.score, "load_piece")
@@ -184,6 +190,7 @@ class CoachPanel(ttk.Frame):
     def _say(self, text):
         self._listen_pending = False
         self.microphone.stop()
+        self._microphone_mode = None
         if isinstance(self.voice, CloudVoiceService):
             self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get(),
                                  speed=float(self.voice_speed.get()))
@@ -212,6 +219,9 @@ class CoachPanel(ttk.Frame):
             return False  # the coach can explain the measured report in more depth
         self._append("You", question)
         self.text.set("")
+        if (name not in {"status", "repeat", "help", "settings_help", "list", "voice_list"}
+                and self._thread is not None and self._thread.is_alive()):
+            self._cancel_request()
         if name == "stop":
             take = getattr(self.score, "take", None)
             self.stop()
@@ -219,6 +229,10 @@ class CoachPanel(ttk.Frame):
                 self.announce("Stopped.")
         elif name == "help":
             self.announce(local_commands.HELP)
+        elif name == "settings_help":
+            self.announce(local_commands.SETTINGS_HELP)
+        elif name == "repeat":
+            self.announce(self._last_message)
         elif name == "list":
             self.announce(local_commands.list_text(self.score.catalog))
         elif name == "load":
@@ -251,7 +265,61 @@ class CoachPanel(ttk.Frame):
                 self.announce("The camera isn't available in this window.")
             else:
                 self.announce(self.camera() if name == "camera" else self.camera(False))
+        elif name in {"voice_list", "voice_select", "speech_speed", "speech", "listening"}:
+            self._voice_control(name, arguments)
+        elif self.controls is not None:
+            try:
+                message = self.controls(name, arguments)
+            except ValueError as exc:
+                message = str(exc)
+            except Exception:
+                message = "That control is unavailable. Say status for the current state, or press F1 to retry."
+            if message and not self._closed:
+                self.announce(message)
+        else:
+            self.announce("That control is not available in this window.")
         return True
+
+    def _voice_control(self, name, arguments):
+        if name == "voice_list":
+            self.announce("Available voices: system, natural offline, " + ", ".join(VOICES) +
+                          ". Say use system voice, or use a voice by name.")
+        elif name == "voice_select":
+            choice = arguments["selection"]
+            selected = {"system": "System (local)", "local": "System (local)",
+                        "natural": NATURAL_VOICE, "natural offline": NATURAL_VOICE,
+                        "offline": NATURAL_VOICE}.get(choice, choice)
+            if selected not in (*VOICES, NATURAL_VOICE, "System (local)"):
+                self.announce("Unknown voice. Say list voices.")
+                return
+            self.voice_choice.set(selected)
+            self._voice_changed()
+            self.announce(f"Voice set to {selected}.")
+        elif name == "speech_speed":
+            speed = arguments["value"]
+            if not .75 <= speed <= 1.15:
+                self.announce("Choose a speaking speed from 0.75 to 1.15.")
+                return
+            self.voice_speed.set(f"{speed:.2f}")
+            self.announce(f"Cloud speaking speed set to {speed:g}. Local voices use their own speaking speed.")
+        elif name == "speech":
+            enabled = arguments["enabled"]
+            if enabled:
+                self.speak.set(True)
+                self.announce("Spoken responses on.")
+            else:
+                self.announce("Spoken responses off. Say speech on, or press F1 and ask for speech on.")
+                self.speak.set(False)
+        elif name == "listening":
+            self.conversation = arguments["enabled"]
+            self.hands_free.set(False)
+            self.microphone.stop()
+            self._microphone_mode = None
+            self._listen_pending = self._listen_next = False
+            if self.conversation:
+                self.announce("Voice conversation on. You can speak when I finish. During playing, say ADA stop.")
+            else:
+                self.announce("Microphone off. Press F1 to speak again, or type a command and press Enter.")
 
     def _queue_local_sound(self, plan, tempo, announcement):
         self._append("ADA", announcement)
@@ -299,12 +367,14 @@ class CoachPanel(ttk.Frame):
     def listen(self):
         self.hands_free.set(False)
         self.microphone.stop()
+        self._microphone_mode = None
+        self._input_notice = None
         self.voice.stop()
         self._listen_pending = True
         if self._microphone_busy():
-            self._listen_pending = False
-            self.microphone_status.set("Stop practice / playback or wait for ADA before speaking a question.")
-            return
+            self.conversation = True
+        if not self.microphone.available:
+            self.microphone.start(retry=True)
         self._poll_microphone()
 
     def listen_after_speech(self, tries=600):
@@ -320,6 +390,7 @@ class CoachPanel(ttk.Frame):
     def _hands_free_changed(self):
         self._listen_pending = False
         self.microphone.stop()
+        self._microphone_mode = None
         self.voice.stop()
         if self.hands_free.get() and not self.microphone.available:
             self.microphone.start(continuous=True, retry=True)
@@ -331,46 +402,78 @@ class CoachPanel(ttk.Frame):
                 or self.score.tutor is not None
                 or self.score.playback.player.status.state == "playing"
                 or self._pending_reference is not None
-                or not self._speech_done.is_set())
+                or not self._speech_done.is_set()
+                or (self._thread is not None and self._thread.is_alive()))
 
     def _poll_microphone(self):
         if not hasattr(self, "microphone"):
             return  # Lightweight headless test panels have no audio service.
-        if self._microphone_busy():
-            self._listen_pending = False
+        if self._closed:
+            return
+        busy = self._microphone_busy()
+        automatic = self.hands_free.get() or self.conversation
+        if busy and not automatic:
             if self.microphone.running:
                 self.microphone.stop()
             self.microphone_status.set("Microphone paused while ADA speaks or reference sound plays.")
             return
+        mode = ("guarded" if busy else "wake" if self.hands_free.get() else
+                "conversation" if self.conversation else "manual")
+        if self._microphone_mode is not None and self._microphone_mode != mode:
+            # Discard audio captured under the previous mode, including ADA's own speech.
+            self.microphone.stop()
+            self._microphone_mode = None
         for text in self.microphone.drain():
-            if self.hands_free.get():
-                command = voice_command(text)
+            command = voice_command(text)
+            if mode in {"guarded", "wake"}:
                 if command is None:
                     continue
                 name, question = command
-                if name == "stop":
-                    self.stop()
-                else:
-                    self.text.set(question)
-                    self.ask()
-                break
-            else:
-                self.text.set(text)
+                if mode == "guarded" and name != "stop":
+                    continue
+            if command is not None and command[0] == "stop":
+                disable = "stop listening" in text.lower()
+                if disable:
+                    self.conversation = False
+                take = getattr(self.score, "take", None)
+                self.stop()
+                if disable:
+                    self.announce("Stopped. Microphone off. Press F1 to speak again.")
+                elif take is None or not take.notes:
+                    self.announce("Stopped.")
+                return
+            self.text.set(command[1] if command is not None else text)
+            if mode == "manual":
                 self.entry.focus_set()
-                if self.conversation:
-                    # Voice-first mode: send what was heard; no button press needed.
-                    self.ask()
-                    self._listen_next = True
-        if self.hands_free.get() and self.microphone.available and not self._microphone_busy():
-            self.microphone.start(continuous=True)
-        elif self._listen_pending and not self.microphone.running:
+            else:
+                self.ask()
+                self._listen_next = self.conversation
+            return
+        if self._microphone_busy() != busy:
+            return  # The accepted command changed activity; start a fresh capture next tick.
+        if self.microphone.available and not self.microphone.running and (automatic or self._listen_pending):
+            previous = self.microphone.status
             self._listen_pending = False
-            self.microphone.start(retry=True)
+            self._microphone_mode = mode
+            if (mode == "conversation" and previous != self._input_notice
+                    and any(word in previous.lower() for word in ("no speech", "unclear", "didn't catch"))):
+                self._input_notice = previous
+                self.announce("I didn't hear a clear question. I'm listening again. You can also type and press Enter.")
+                return
+            self.microphone.start(continuous=mode in {"guarded", "wake"}, retry=mode == "manual")
         if not self.microphone.available:
             self.hands_free.set(False)
-        self.microphone_status.set(self.microphone.status)
+            if automatic and self._input_notice != "unavailable":
+                self._input_notice = "unavailable"
+                self.announce(self.microphone.status + " Press F1 to retry, or type and press Enter.")
+        self.microphone_status.set(("Listening for ADA stop while sound or practice is active. "
+                                    if mode == "guarded" and self.microphone.available else "") + self.microphone.status)
 
     def _append(self, speaker, text):
+        if speaker == "ADA" and text:
+            self._last_message = text
+        if self.on_message is not None:
+            self.on_message(speaker, text)
         self.transcript.configure(state="normal")
         self.transcript.insert("end", f"{speaker}: {text}\n\n")
         # Bounded visible history too.
@@ -384,13 +487,13 @@ class CoachPanel(ttk.Frame):
             self.voice.stop()
 
     def ask(self):
-        if self._thread is not None and self._thread.is_alive():
-            self.status.set("ADA is still finishing a request. Stop it or wait.")
-            return
         question = self.text.get().strip()
         if not question:
             return
         if self.local_commands and self._local(question):
+            return
+        if self._thread is not None and self._thread.is_alive():
+            self.status.set("ADA is still finishing a request. Say ADA stop, or wait.")
             return
         if getattr(self.score, "take", None) is not None:
             self.score.finish_take()  # "ADA, ..." right after playing scores the take first
@@ -401,6 +504,7 @@ class CoachPanel(ttk.Frame):
             self.status.set("Keep your question under 2,000 characters.")
             return
         self.microphone.stop()
+        self._microphone_mode = None
         self.voice.stop()
         review = self.score.loaded
         if review is None:
@@ -421,6 +525,7 @@ class CoachPanel(ttk.Frame):
         self._request_review = review
         self._request_context_active = True
         self._request_attempt = attempt if summary else None
+        self._request_performance = getattr(self.score, "latest_performance", None) if performance else None
         self._activity_version = self.score.activity_version
         self._reference_outcome = None
         self._request_playback_status = self.score.playback.player.status
@@ -437,8 +542,9 @@ class CoachPanel(ttk.Frame):
                     return {"status": "cancelled"}
             return box["result"]
 
+        hands = deepcopy(self.score.hand_summary()) if hasattr(self.score, "hand_summary") else None
         tools = AgentTools(snapshot, summary, action, performance,
-                           self.score.catalog if hasattr(self.score, "catalog") else None)
+                           self.score.catalog if hasattr(self.score, "catalog") else None, hands=hands)
         coach = Coach(tools, self.client, api_key=self._api_key, model=self._model)
         coach.history = list(self._history)
 
@@ -593,6 +699,11 @@ class CoachPanel(ttk.Frame):
                     attempt = self._request_attempt
                     if attempt and attempt.context["sha256"] == review.digest:
                         attempt.feedback.append(answer)
+                    performance = getattr(self, "_request_performance", None)
+                    if performance is not None and performance is getattr(self.score, "latest_performance", None):
+                        performance["feedback"].append(answer)
+                    if (attempt or performance) and getattr(self.score, "on_completed", None) is not None:
+                        self.score.on_completed(self.score.session_snapshot())
                     if self.speak.get() and self.score.tutor is None and not self._reference_active and self._pending_reference is None:
                         self._say(answer)
                     self.status.set("ADA ready. " + self.voice.status)
@@ -601,8 +712,8 @@ class CoachPanel(ttk.Frame):
                         # Request delivered: later local activity must not "cancel" it and silence announcements.
                         self._request_context_active = False
                 else:
-                    self._append("ADA", payload)
-                    self.status.set(payload)
+                    self.announce(payload)
+                    self._request_context_active = False
         except Empty:
             pass
         try:
@@ -613,6 +724,8 @@ class CoachPanel(ttk.Frame):
         if self._thread is None or not self._thread.is_alive():
             self.ask_button.configure(state="normal")
         self._poll_microphone()
+        if self._closed:
+            return
         if (getattr(self, "_listen_next", False) and (self._thread is None or not self._thread.is_alive())
                 and self._pending_reference is None and not self._reference_active):
             self._listen_next = False
@@ -627,8 +740,6 @@ class CoachPanel(ttk.Frame):
                 and self.score.activity_version != self._activity_version):
             self._cancel_request()
             return
-        if self.score.tutor is not None:
-            self.voice.stop()
         if self._pending_reference:
             review, exercise, tempo, finished = self._pending_reference
             if self.score.loaded is not review:
@@ -727,6 +838,8 @@ class CoachPanel(ttk.Frame):
         self._listen_pending = False
         self.hands_free.set(False)
         self.microphone.stop()
+        self._microphone_mode = None
+        self._listen_next = self.conversation
         self._cancel_request()
         self._pending_reference = self._pending_practice = None
         self._reference_active = False
@@ -734,6 +847,9 @@ class CoachPanel(ttk.Frame):
         self._activity_version = None
         self.voice.stop()
         self.score.stop()
+        hands = getattr(self.score, "hand_analysis", None)
+        if hands is not None and hands.calibrating:
+            hands.cancel_calibration()
         self.status.set("ADA stopped. MIDI remains connected.")
 
     def close(self):

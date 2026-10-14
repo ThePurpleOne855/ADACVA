@@ -1,8 +1,26 @@
-# Score-guided piano learning plan
+# Score-guided piano learning: current delivery and historical plan
+
+## Integrated prototype — 2026-10-13
+
+The desktop now connects voice controls, a minimal practice screen, timestamped
+MIDI comparison, spoken score review, calibrated fingertip proximity evidence,
+optional AI coaching, and atomic local JSON session exports. MIDI is timestamped
+on arrival; camera observations use host acquisition times. Calibration does not
+establish correct fingering or posture. Exports do not contain raw camera frames
+or landmarks, and there is no session browser or automatic resume.
+
+The current scope and limits are in [README.md](README.md) and the
+[voice guide](docs/ACCESSIBLE_PRACTICE.md). Remaining acceptance work is hardware
+validation, microphone interruption while sound plays, imported-score checks,
+screen-reader compatibility, and trials with blind learners.
+
+**The sections below preserve the original design and dated handoffs. Their
+estimates, future features, and status statements are historical, not the current
+implementation contract.**
 
 Target experience: import a PDF or MusicXML score, review the recognized music, play on the Yamaha YPT-300, record the performance, compare it with the score, and receive spoken/visual corrections. Camera observations will support guidance toward the intended keys and suggested fingering.
 
-## Current state
+## Historical starting state
 
 Live YPT-300 input through the mioXC is user-confirmed. Note Reader displays a virtual keyboard, velocity, channel, sustain, and note history. The duration column measures press to release. Automated tests cover the reader, desktop GUI, and audible-reference engine. Timing for input currently uses GUI polling timestamps and is approximate.
 

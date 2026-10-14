@@ -9,10 +9,17 @@ import re
 
 from ada_piano import pieces
 
-HELP = ("You can say: list pieces. Practice Für Elise, or Ode to Joy, optionally with a passage "
-        "like theme, and right hand or left hand. Play it for me, to hear it. Replay, to hear yourself. Start camera. Record, then play; "
-        "pause four seconds when done. How did I do. Stop. Keys: F1 speak to ADA, F5 record, "
-        "F6 results, F7 camera, Escape stop.")
+HELP = ("Say list pieces, then practice a piece by name. Say play it for me, guided practice, "
+        "or record. Pause four seconds for results. Say list MIDI inputs, select MIDI input one, "
+        "or connect piano. Say start camera, calibrate hands, or hand report. "
+        "Say help settings for more controls. While playing or hearing ADA, say ADA stop. "
+        "F1 opens the microphone; Escape stops; Tab moves between controls.")
+SETTINGS_HELP = ("Say status, repeat, list MIDI outputs, select MIDI output one, list cameras, "
+                 "select camera one, tempo sixty, slower, faster, measures one to four, "
+                 "right hand, left hand, or both hands. Say save session, show tools, hide tools, "
+                 "list voices, use system voice, speech speed one, stop listening, or quit. "
+                 "For imports, say list score files, import score one, list score options, "
+                 "review passage, next measure, then approve passage after checking the notes.")
 
 _STOP = re.compile(r"^(stop|cancel|quiet|be quiet|pause)( (it|that|now|please|recording|practice|playing))*$")
 _HELP = re.compile(r"\b(help|what can (i|you) (say|do)|commands)\b")
@@ -29,14 +36,122 @@ _HANDS = {"right": re.compile(r"\bright\b"), "left": re.compile(r"\bleft\b"),
 
 
 def _plain(text):
-    return pieces._plain(text)
+    return " ".join(pieces._plain(text).split())
+
+
+def _number(text):
+    """Recognizers return either digits or English numbers for device/tempo commands."""
+    text = text.strip()
+    if text.isdigit():
+        return int(text)
+    units = ("zero one two three four five six seven eight nine ten eleven twelve thirteen "
+             "fourteen fifteen sixteen seventeen eighteen nineteen").split()
+    tens = dict(zip("twenty thirty forty fifty sixty seventy eighty ninety".split(), range(20, 100, 10)))
+    words = text.replace("-", " ").split()
+    if len(words) == 1:
+        return units.index(text) if text in units else tens.get(text)
+    if len(words) == 2 and words[0] in tens and words[1] in units[1:10]:
+        return tens[words[0]] + units.index(words[1])
+    if len(words) >= 2 and words[0] in units[1:4] and words[1] == "hundred":
+        rest = " ".join(words[2:]).removeprefix("and ")
+        tail = _number(rest) if rest else 0
+        if tail is not None and tail < 100:
+            return units.index(words[0]) * 100 + tail
+    return None
+
+
+def _controls(plain):
+    commands = {
+        "status": "status", "where am i": "status", "what is happening": "status",
+        "repeat": "repeat", "repeat that": "repeat", "say that again": "repeat",
+        "repeat last instruction": "repeat", "help settings": "settings_help",
+        "connect": "midi_connect", "connect piano": "midi_connect", "connect midi": "midi_connect",
+        "disconnect": "midi_disconnect", "disconnect piano": "midi_disconnect", "disconnect midi": "midi_disconnect",
+        "list cameras": "camera_list", "guided practice": "guided", "start guided practice": "guided",
+        "calibrate hands": "calibrate", "start calibration": "calibrate", "calibrate": "calibrate",
+        "calibration done": "calibration_done", "finish calibration": "calibration_done",
+        "reset calibration": "calibration_reset", "hand report": "hand_report", "hand analysis": "hand_report",
+        "save session": "save_session", "save attempt": "save_session",
+        "list voices": "voice_list", "quit": "quit", "exit": "quit", "close ada": "quit",
+        "list import files": "score_files", "list score files": "score_files",
+        "read score": "review_score", "review passage": "review_score",
+        "next measure": "review_next", "approve passage": "approve_score", "approve score": "approve_score",
+        "cancel import": "cancel_import",
+        "list score options": "score_options",
+    }
+    if plain in commands:
+        return commands[plain], {}
+    match = re.fullmatch(r"calibrate (?:my )?(left|right)(?: hand)?", plain)
+    if match:
+        return "calibrate", {"hand": match[1]}
+    match = re.fullmatch(r"(?:select|use|choose) score (output|part|staff|voice) (.+)", plain)
+    if match:
+        selected = match[2].removeprefix("number ")
+        number = _number(selected)
+        return "score_select", {"field": match[1], "selection": str(number) if number is not None else selected}
+    if plain in {"show tools", "hide tools"}:
+        return "show_tools", {"visible": plain == "show tools"}
+    if plain in {"slower", "slow down", "faster", "speed up"}:
+        return "tempo", {"delta": -10 if plain in {"slower", "slow down"} else 10}
+    if plain in {"stop listening", "microphone off", "start listening", "microphone on"}:
+        return "listening", {"enabled": plain in {"start listening", "microphone on"}}
+    if plain in {"speech on", "speech off", "speak responses", "mute responses"}:
+        return "speech", {"enabled": plain in {"speech on", "speak responses"}}
+    match = re.fullmatch(r"(?:list|show) (?:midi )?(inputs|outputs)", plain)
+    if match:
+        return "midi_list", {"direction": match[1][:-1]}
+    match = re.fullmatch(r"(?:select|use|choose) (?:midi )?(input|output|camera) (.+)", plain)
+    if match:
+        selected = match[2].removeprefix("number ")
+        number = _number(selected)
+        selected = str(number) if number is not None else selected
+        return (("camera_select", {"selection": selected}) if match[1] == "camera" else
+                ("midi_select", {"direction": match[1], "selection": selected}))
+    match = re.fullmatch(r"(?:set )?(?:the )?tempo(?: to)? (.+?)(?: bpm| beats per minute)?", plain)
+    if match:
+        number = _number(match[1])
+        if number is not None:
+            return "tempo", {"value": number}
+    match = re.fullmatch(r"(?:practice |select |use )?(right|left|both)(?: hand| hands)(?: only)?", plain)
+    if match:
+        return "hands", {"hands": match[1]}
+    match = re.fullmatch(r"(?:practice |select |use )?(?:measures?|bars?) (.+?)(?: (?:to|through) (.+))?", plain)
+    if match:
+        first, last = _number(match[1]), _number(match[2] or match[1])
+        if first is not None and last is not None:
+            return ("guided_passage" if plain.startswith("practice ") else "passage"), {
+                "start_measure": str(first), "end_measure": str(last)}
+    match = re.fullmatch(r"(?:use |select |set )?(?:voice (.+)|(.+?) voice)", plain)
+    if match and not _QUESTION.search(plain):
+        return "voice_select", {"selection": match[1] or match[2]}
+    return None
 
 
 def parse(text, catalog):
     """Return (command, arguments) or None to let the cloud coach answer."""
+    source = re.fullmatch(r"(?:hey\s+)?(?:ada[, ]+)?(?:please\s+)?import score\s+(.+)", text.strip(), re.I)
+    if source:
+        selected = source[1].strip().strip('"')
+        number = _number(_plain(selected).removeprefix("number "))
+        return "import_score", {"selection": str(number) if number is not None else selected}
+    camera = re.fullmatch(r"(?:ada[, ]+)?(?:select|use|choose) camera\s+(.+)", text.strip(), re.I)
+    if camera and re.search(r"[.:/\\]", camera[1]):
+        return "camera_select", {"selection": camera[1]}
     plain = _plain(text.replace("'", ""))
+    plain = re.sub(r"^(?:hey )?(?:ada|aida|a da) ", "", plain)
+    plain = re.sub(r"^please | please$", "", plain)
     if not plain:
         return None
+    # Preserve decimal speeds before general punctuation normalization.
+    speed = re.fullmatch(r"(?:ada[, ]+)?(?:set )?(?:speech|speaking|voice) speed(?: to)? (\d+(?:\.\d+)?)",
+                         text.strip().lower().rstrip(".!"))
+    if speed:
+        return "speech_speed", {"value": float(speed[1])}
+    if plain in {"speech speed one", "speaking speed one", "normal speaking speed"}:
+        return "speech_speed", {"value": 1.0}
+    control = _controls(plain)
+    if control is not None:
+        return control
     if _STOP.match(plain):
         return "stop", {}
     # Short commands only, so questions like "can you help me with measure three in the

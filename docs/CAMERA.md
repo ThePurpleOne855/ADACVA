@@ -1,10 +1,31 @@
-# Overhead camera: build and tracking plan
+# Overhead camera: setup and hand observations
 
 The live hand-tracking preview is part of the main window (`note-reader`, see
-the README). This page covers the standalone tracker for recording landmarks or
-testing still photos, plus the overhead-mount plan. Neither identifies piano
-keys, detects key presses, or grades fingering: MIDI note-on events remain the
-source of truth for which notes sounded.
+the README). The main app now supports spoken calibration and joins nearby
+fingertips to timestamped MIDI attacks. These are proximity estimates, not proof
+of finger contact or correct technique. MIDI remains the source of key presses.
+This page also covers the standalone tracker and overhead-mount plan.
+
+## Calibration in the practice app
+
+Say **“calibrate hands”** with a connected MIDI piano and a fixed camera. The
+default is your right index finger; **“calibrate left hand”** chooses the left.
+Press three separated white keys over at least one octave, with that one hand
+visible. Hold still for half a second on each key and release between presses.
+Then capture two black keys at least seven semitones apart, or say **“finish
+calibration”** for white keys only. ADA names captured keys and rejected samples.
+
+The mapping is a fitted line for each key color within the anchor range, not a
+full perspective transform. Observations outside the calibrated contact lines,
+ambiguous fingers/hand labels, and missing or stale frames are rejected. Camera
+timestamps are host acquisition times; network buffering is not compensated.
+Stopping, switching, or losing the camera invalidates the mapping. Physical
+movement cannot be detected automatically: recalibrate if the camera or piano moves.
+
+Record a take, then say **“hand report.”** Local session exports and the optional
+AI coach receive bounded observations and explicit unknown counts, never images.
+See the [voice guide](ACCESSIBLE_PRACTICE.md#optional-camera-and-midi-hand-observations)
+for exact commands and limits. Real camera/MIDI validation is still needed.
 
 ## Run the standalone tracker
 
@@ -78,18 +99,19 @@ keyboard with enough pixels per key, prioritize a two-octave training region
 or use a second camera. Do not infer the webcam's field of view from its
 appearance in a photo.
 
-## Make the view musically useful
+## Further work after hardware validation
 
-1. **Calibrate the keyboard.** Fix the mount, then record the four corners of
+1. **Expand calibration.** The implemented contact-line mapping covers a fixed
+   region. A future full-keybed mapping could record the four corners of
    the visible keybed and several black-key landmarks. Use a perspective
    transform to map image points into keyboard coordinates. Recalibrate after
    any mount movement. Offer keyboard controls and spoken prompts for setup.
 2. **Locate fingers over keys.** Transform each fingertip into keyboard space,
    show the likely white or black key under it, and smooth short tracking gaps.
    Test with two hands, different skin tones, sleeves, and realistic lighting.
-3. **Join camera and MIDI.** On each MIDI note-on, look at nearby camera frames
-   and rank plausible fingers by proximity and recent downward motion. Report
-   a finger assignment only when confidence is high; otherwise say unknown.
+3. **Validate camera/MIDI association.** The implemented observer requires stable
+   proximity across frames surrounding a MIDI attack. Measure its errors on
+   labeled recordings before adding motion-based attribution or relaxing thresholds.
    Video alone cannot reliably prove a key was pressed when fingertips obscure
    the keys, and MediaPipe landmark depth is relative to the hand, not a
    calibrated distance to the key surface.

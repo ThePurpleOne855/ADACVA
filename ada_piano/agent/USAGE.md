@@ -13,8 +13,9 @@ Use the same uv command in Windows PowerShell:
 uv run --locked --extra agent python -m ada_piano.agent
 ```
 
-The same controls are also available in the combined Note Reader's ADA Coach
-tab. Score-specific actions require that host's reviewed, approved score and
+The combined Note Reader opens a minimal voice practice screen; its ADA Coach
+tab is under Tools (F3). See the [voice practice guide](../../docs/ACCESSIBLE_PRACTICE.md)
+for local device, calibration, review, and session commands. Score-specific actions require that host's reviewed, approved score and
 the relevant MIDI hardware. Standalone chat cannot load, approve or play a
 score. General learning advice is not evidence of what the learner played.
 
@@ -54,9 +55,10 @@ shown if it fails. The GUI stays responsive during requests.
 
 Windows uses installed English `System.Speech` dictation with the default
 microphone; its recognition stays local. Linux uses PipeWire `pw-record`, or
-ALSA `arecord`, and the existing OpenAI SDK to transcribe short audio clips with
-`gpt-4o-mini-transcribe`. Linux listening sends audio to OpenAI and incurs API
-charges. It starts only when you enable a microphone control. macOS retains text
+ALSA `arecord`. Without an API key it can transcribe locally using faster-whisper
+from the voice extra. With a key it sends short audio clips through the existing
+OpenAI transcription adapter and incurs API charges. Standalone chat starts listening
+when enabled; the main practice app starts conversation automatically. macOS retains text
 chat and speech output; microphone recognition is not implemented there yet.
 
 On Linux, choose **Speak responses** and **Hands-free: say “ADA …”** to converse.
@@ -80,18 +82,19 @@ Avoid choosing a loopback/monitor source when you intend to use a microphone.
   with “ADA” or “Hey ADA” is automatically sent. Ordinary background speech is
   ignored by the chat dispatcher. This is a dictation-prefix filter, not a
   dedicated wake-word model; quiet surroundings and a headset help accuracy.
-- “ADA stop” cancels the request and turns hands-free listening off. The Stop
-  button also stops pending actions and speech. Voice Stop works while thinking
-  and practicing, but microphone input pauses while ADA speaks or reference
-  sound plays to avoid hearing itself. During those pauses use the Stop button.
+- “ADA stop” cancels the request, practice, sound, and calibration. During speech,
+  playback, practice, or thinking, automatic listening accepts only wake-prefixed
+  stop commands. In the main app, conversation resumes afterward; say “stop
+  listening” to disable it. This filter does not cancel acoustic echo. Escape
+  provides an immediate keyboard stop in the main practice window.
 - **Speak responses** enables OpenAI AI-generated speech (`gpt-4o-mini-tts`),
   initially using `cedar` at 0.95× speed with conversational delivery, clear note
   names and short pauses between instructions. Choose another voice from
   **Voice**, or choose **System (local)** for the original offline voice.
   **Speaking speed** adjusts cloud voices from 0.75× to 1.15×. **Preview voice**
   reads the same short piano instruction with your chosen voice and speed without
-  sending a chat question or enabling automatic spoken replies. It pauses the
-  microphone while speaking, and Stop cancels it. Preview is unavailable during
+  sending a chat question or enabling automatic spoken replies. Automatic listening
+  accepts only wake-prefixed stop during speech; Stop also cancels it. Preview is unavailable during
   practice, reference playback or an active chat request. Voice and speed choices
   apply for this session. Music notation such as `C#4` is spoken as “C sharp four”;
   the displayed reply retains its original notation.
@@ -99,13 +102,13 @@ Avoid choosing a loopback/monitor source when you intend to use a microphone.
   text to OpenAI, and incurs a separate speech API charge. It is disabled by
   default. Chat still uses the Responses API; speech uses the Audio speech API,
   not a new chat or Realtime conversation. Windows recognition stays local;
-  Linux recognition uses the transcription API.
+  Linux recognition uses local Whisper when no API key is configured.
   Typed chat remains
   usable when either microphone recognition or speech output is unavailable.
 
-Low-confidence Windows results are discarded. The microphone starts only when enabled,
-stops on Stop/window close, and has a visible status. Windows audio is not uploaded;
-Linux audio is sent for transcription as described above. In hands-free mode the recognized question text is
+Low-confidence Windows results are discarded. The microphone has a visible status
+and stops on window close. Windows audio is not uploaded; Linux audio is sent for
+transcription when a key is configured. In hands-free mode the recognized question text is
 sent through the usual coach request. The microphone subprocess does not inherit
 `OPENAI_API_KEY`. Allow desktop microphone access in Windows yourself if needed,
 select the correct default recording device, and install English speech

@@ -55,7 +55,8 @@ def voice_command(text):
     question = match.group(1).strip()
     if not question:
         return None
-    if question.lower().rstrip(".!?") in {"stop", "stop practice", "stop listening"}:
+    if re.fullmatch(r"(?:stop|cancel|quiet)(?: (?:practice|recording|playing|listening|now|please))*[.!?]*",
+                    question, re.I):
         return ("stop", "")
     return ("ask", question)
 

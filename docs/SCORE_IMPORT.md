@@ -8,8 +8,13 @@ From the project root:
 uv run --locked --extra camera --extra midi python -m ada_piano note-reader
 ```
 
-Choose the top-level **Scores · import & practice** tab. Use the **Piano & Camera**
+Press F2 to open **Scores · import & practice**, or F3 for all tools. Use the **Piano & Camera**
 tab to configure the MIDI input, reference output/tempo, and camera.
+
+Voice commands also support listing/importing files, choosing score parts and
+staves, reading notes/rests aloud, and explicit approval. See the
+[spoken review workflow](ACCESSIBLE_PRACTICE.md#import-and-spoken-review).
+Imported notation still needs checking against a trusted source before approval.
 
 1. Click **Choose PDF / MusicXML**. Files stay on your computer. Existing
    `.musicxml`, `.xml`, and `.mxl` files bypass recognition.

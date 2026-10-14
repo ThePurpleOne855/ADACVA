@@ -1,7 +1,10 @@
 """PDF import, text review, and approved score practice inside the piano window."""
 
+from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
+from uuid import uuid4
 import tkinter as tk
 from tkinter import filedialog, ttk
 import webbrowser
@@ -46,6 +49,9 @@ class ScorePanel(ttk.Frame):
         self.take_context = None
         self.take_tempo = None
         self.latest_performance = None
+        self.hand_analysis = None
+        self.on_completed = None
+        self._latest_mode = None
         self.announce = None  # optional callable(text) that speaks status for blind learners
         self.catalog = pieces.catalog() if catalog is None else catalog
         self._choices = _piece_choices(self.catalog)
@@ -82,7 +88,7 @@ class ScorePanel(ttk.Frame):
         ttk.Button(quick, text="Load piece", command=self.load_choice).pack(side="left", padx=4)
         self.take_button = ttk.Button(quick, text="Record play-through (F5)", command=self.play_through, state="disabled")
         self.take_button.pack(side="left")
-        ttk.Checkbutton(self, text="Show tools to import a new PDF or MusicXML (needs a sighted check)",
+        ttk.Checkbutton(self, text="Show score import and review tools",
                         variable=self.show_import, command=self._toggle_import).grid(row=1, column=0, sticky="w", pady=3)
         body = self.import_tools = ttk.Frame(self)
         body.grid(row=2, column=0, sticky="nsew")
@@ -195,6 +201,7 @@ class ScorePanel(ttk.Frame):
         self._invalidate()
         self.review = review
         self.take_tempo = piece.default_tempo
+        self.playback.tempo.set(str(piece.default_tempo))
         self._set_loaded(review)
         self.path_label.set(f"Loaded from the checked library: {piece.file.name}")
         hand_text = "both hands" if review.piece["hands"] == "both" else f"{review.piece['hands']} hand"
@@ -226,6 +233,8 @@ class ScorePanel(ttk.Frame):
             return False
         self.stop_practice()
         self.take = PlayThrough(monotonic())
+        if self.hand_analysis is not None:
+            self.hand_analysis.begin_take(self.take.started_at)
         self.take_exercise = exercise
         self.take_context = context if context is not None else self.loaded.context()
         if tempo is not None:
@@ -239,19 +248,53 @@ class ScorePanel(ttk.Frame):
         if take is None:
             return None
         take.finish(monotonic())
+        hands = self.hand_analysis.finish_take(take.ended_at) if self.hand_analysis is not None else None
         if not take.notes:
             self._say("Recording stopped. I didn't hear any notes.")
             return None
         report = compare(self.take_exercise, take.notes, target_bpm=self.take_tempo)
         context = self.take_context
         self.latest_performance = {
+            "session_id": str(uuid4()), "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "start_monotonic": take.started_at, "end_monotonic": take.ended_at,
             "score_sha256": context["sha256"], "selection": context["selection"],
             "title": context["title"], "report": report, "feedback": [],
+            "hand_analysis": hands,
             "played": [(n.pitch, n.onset, n.release, n.velocity) for n in take.notes]}
         # No activity_version bump: scoring ends the take rather than starting new activity,
         # and a bump would make the coach cancel its request and silence this summary.
         self._say(describe(report))
+        self._completed("play_through")
         return report
+
+    def _completed(self, mode):
+        self._latest_mode = mode
+        if self.on_completed is not None:
+            self.on_completed(self.session_snapshot())
+
+    def session_snapshot(self):
+        """A JSON-compatible local export, with no camera frames or credentials."""
+        if self._latest_mode == "play_through" and self.latest_performance is not None:
+            return {"schema_version": 1, "mode": "play_through", **deepcopy(self.latest_performance)}
+        if self.latest_attempt is not None:
+            return {**self.latest_attempt.snapshot(), "mode": "guided",
+                    "session_id": self.latest_attempt.attempt_id}
+        return None
+
+    def hand_summary(self):
+        """Only observations belonging to the current passage are coach evidence."""
+        if self.hand_analysis is None or self.loaded is None:
+            return None
+        if self.take is not None or self.tutor is not None:
+            return self.hand_analysis.summary()
+        if self._latest_mode == "play_through" and self.performance_summary() is not None:
+            return self.latest_performance.get("hand_analysis")
+        attempt = self.latest_attempt
+        if (self._latest_mode == "guided" and attempt is not None
+                and attempt.context["sha256"] == self.loaded.digest
+                and all(attempt.context["selection"].get(k) == v for k, v in self.loaded.selection.items())):
+            return attempt.hand_analysis
+        return None
 
     def replay_plan(self):
         """The learner's latest take for this passage as PlaybackNotes at 60 BPM (1 beat = 1 s)."""
@@ -451,30 +494,33 @@ class ScorePanel(ttk.Frame):
     def practice(self, exercise=None, context=None):
         self.activity_version += 1
         if self.loaded is None:
+            self._say("Load a piece first. Say practice Ode to Joy, or list pieces.")
             return
         if not self.connected():
-            self.feedback.set("Connect the piano input first. Demo input is not graded.")
+            self._say("Connect the piano input first. Demo input is not graded.")
             return
         if self.playback.player.status.state == "playing":
-            self.feedback.set("Wait for the reference to finish or stop its sound before practicing.")
+            self._say("Wait for the reference to finish or stop its sound before practicing.")
             return
         self.stop_practice()
         self.tutor = Tutor(exercise if exercise is not None else self.loaded.exercise)
         self.attempt = AttemptRecorder(context if context is not None else self.loaded.context())
+        if self.hand_analysis is not None:
+            self.hand_analysis.begin_take(self.attempt.started_at)
         self._following_playback = False
-        self.feedback.set("Your turn. Release held keys first. " + self.tutor.prompt())
+        self._say("Your turn. Release held keys first. " + self.tutor.prompt())
 
     def stop_practice(self):
         self.activity_version += 1
         if self.take is not None:
-            if self.take.notes:
-                self.finish_take()
-            else:
-                self.take = None
+            self.finish_take()
         if self.attempt is not None:
             self.attempt.finish()
+            if self.hand_analysis is not None:
+                self.attempt.hand_analysis = self.hand_analysis.finish_take(self.attempt.ended_at)
             self.latest_attempt = self.attempt
             self.attempt = None
+            self._completed("guided")
         if self.tutor is not None:
             self.feedback.set("Practice stopped. Start a new attempt when ready.")
         self.tutor = None
@@ -499,12 +545,15 @@ class ScorePanel(ttk.Frame):
         result = self.tutor.evaluate(NoteEvent(event.note, event.velocity, event.timestamp, "midi",
                                               "note_on" if event.kind == "on" else "note_off", event.channel - 1))
         if result:
-            self.feedback.set(result.message)
+            self._say(result.message)
             self.attempt.record(result)
         if self.tutor.complete:
+            if self.hand_analysis is not None:
+                self.attempt.hand_analysis = self.hand_analysis.finish_take(self.attempt.ended_at)
             self.latest_attempt = self.attempt
             self.attempt = None
             self.tutor = None
+            self._completed("guided")
 
     def agent_context(self):
         if self.loaded is None:
@@ -542,10 +591,14 @@ class ScorePanel(ttk.Frame):
                     self.file_selector["values"] = tuple(self._outputs)
                     self.output.set(next(iter(self._outputs)))
                     self.select_output()
+                    self._say("Score imported. Say review passage to hear the first selected measures. "
+                              "Recognized notes must be checked before you say approve passage.")
+                else:
+                    self._say(status.detail)
             if self.take is not None and self.take.idle_for(monotonic()) >= TAKE_SILENCE:
                 self.finish_take()
             if self.take is not None and self.playback.player.status.state == "playing":
-                self.take = None
+                self.finish_take()
                 self._say("Reference playing, so recording stopped.")
             if self.tutor is not None and self.playback.player.status.state == "playing":
                 self.stop_practice()

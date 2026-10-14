@@ -200,12 +200,98 @@ class StandaloneGuiTests(unittest.TestCase):
         self.assertFalse(self.panel.hands_free.get())
         self.assertTrue(self.panel._cancel.is_set())
 
-    def test_microphone_pauses_during_spoken_response(self):
+    def test_microphone_accepts_only_wake_stop_during_spoken_response(self):
         self.panel.hands_free.set(True)
         self.panel._speech_done = Event()
         self.panel._poll_microphone()
+        self.assertTrue(self.microphone.running)
+        self.assertIn("ADA stop", self.panel.microphone_status.get())
+        self.microphone.events = ["stop", "ADA record", "play it", "ADA what can you do"]
+        self.panel._poll_microphone()
+        self.client.respond.assert_not_called()
+        self.assertFalse(self.panel._cancel.is_set())
+        self.microphone.events = ["ADA stop"]
+        self.panel._poll_microphone()
+        self.assertTrue(self.panel._cancel.is_set())
         self.assertFalse(self.microphone.running)
-        self.assertIn("paused", self.panel.microphone_status.get())
+
+    def test_voice_stop_during_recording_preserves_conversation(self):
+        self.panel.conversation = True
+        self.panel.score.take = NS(notes=[60])
+        self.panel.score.stop = Mock()
+        self.panel._poll_microphone()
+        self.assertTrue(self.microphone.running)
+        self.microphone.events = ["ordinary piano transcription", "ADA stop recording"]
+        self.panel._poll_microphone()
+        self.panel.score.stop.assert_called_once()
+        self.assertTrue(self.panel.conversation)
+        self.client.respond.assert_not_called()
+
+    def test_guarded_audio_is_discarded_when_sound_finishes(self):
+        self.panel.conversation = True
+        self.panel._speech_done = Event()
+        self.panel._poll_microphone()
+        self.microphone.events = ["record", "a piano should sound like this"]
+        self.panel._speech_done.set()
+        self.panel._poll_microphone()
+        self.client.respond.assert_not_called()
+        self.assertEqual(self.microphone.events, [])
+        self.assertEqual(self.panel._microphone_mode, "conversation")
+
+    def test_idle_conversation_recovers_after_silence_and_speaks_error_once(self):
+        self.panel.conversation = True
+        self.microphone.status = "No speech heard. Try again."
+        self.panel._poll_microphone()
+        self.assertIn("listening again", self.panel.transcript.get("1.0", "end"))
+        self.panel._poll_microphone()
+        self.assertTrue(self.microphone.running)
+        self.microphone.running = self.microphone.available = False
+        self.microphone.status = "Microphone unavailable."
+        self.panel._poll_microphone()
+        self.panel._poll_microphone()
+        text = self.panel.transcript.get("1.0", "end")
+        self.assertEqual(text.count("Microphone unavailable"), 1)
+        self.assertIn("Press F1 to retry", text)
+
+    def test_stop_listening_requires_explicit_resume(self):
+        self.panel.conversation = True
+        self.microphone.events = ["ADA stop listening"]
+        self.panel._poll_microphone()
+        self.panel._poll_microphone()
+        self.assertFalse(self.panel.conversation)
+        self.assertFalse(self.microphone.running)
+
+    def test_local_host_controls_and_transcript_callback(self):
+        self.panel.local_commands = True
+        self.panel.score.catalog = []
+        self.panel.controls = Mock(return_value="Tempo is now 70 beats per minute.")
+        self.panel.on_message = Mock()
+        self.panel.text.set("tempo seventy")
+        self.panel.ask()
+        self.panel.controls.assert_called_once_with("tempo", {"value": 70})
+        self.panel.on_message.assert_any_call("ADA", "Tempo is now 70 beats per minute.")
+        self.client.respond.assert_not_called()
+        self.panel.text.set("repeat")
+        self.panel.ask()
+        self.assertEqual(self.panel._last_message, "Tempo is now 70 beats per minute.")
+
+    def test_local_stop_works_during_model_request(self):
+        self.panel.local_commands = True
+        self.panel.score.catalog = []
+        self.panel._thread = NS(is_alive=lambda: True)
+        self.panel.text.set("stop")
+        self.panel.ask()
+        self.assertTrue(self.panel._cancel.is_set())
+
+    def test_voice_settings_without_cloud_request(self):
+        self.panel.local_commands = True
+        self.panel.score.catalog = []
+        for command in ("use system voice", "speech speed 0.85", "list voices"):
+            self.panel.text.set(command)
+            self.panel.ask()
+        self.assertEqual(self.panel.voice_choice.get(), "System (local)")
+        self.assertEqual(self.panel.voice_speed.get(), "0.85")
+        self.client.respond.assert_not_called()
 
     def test_cloud_speech_receives_session_key_and_selected_voice(self):
         from .cloud_voice import CloudVoiceService
@@ -222,6 +308,13 @@ class StandaloneGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.voice._voice, "cedar")
         self.assertEqual(self.panel.voice._speed, .85)
         self.assertNotIn("private-session-key", self.panel.transcript.get("1.0", "end"))
+
+    def test_spoken_speed_keeps_the_cloud_service_bounds(self):
+        self.panel.voice_speed.set("0.85")
+        for speed in (0.5, 1.2, float("inf"), float("nan")):
+            self.panel._voice_control("speech_speed", {"value": speed})
+            self.assertEqual(self.panel.voice_speed.get(), "0.85")
+        self.assertIn("0.75 to 1.15", self.panel.transcript.get("1.0", "end"))
 
     def test_preview_pauses_microphone_without_sending_chat(self):
         from .cloud_voice import PREVIEW_TEXT
