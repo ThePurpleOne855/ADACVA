@@ -51,19 +51,46 @@ uv run --locked --all-extras python -m ada_piano note-reader
 
 The first run downloads Python dependencies. Connect **piano MIDI OUT → interface MIDI IN → computer USB** to read your playing. For audible reference through the piano, also connect **interface MIDI OUT → piano MIDI IN** and select the MIDI output in the app. Say or type “practice Ode to Joy,” then “record”; play and pause for about four seconds to hear the report. The desktop **Demo** button shows simulated MIDI activity but is not graded as a learner performance.
 
-An OpenAI API key is optional. Cloud coaching, speech, and transcription can incur API charges when used. For natural offline speech, run `uv run --locked --all-extras ada-piano voice-setup` once. The [voice-first guide](docs/ACCESSIBLE_PRACTICE.md) covers microphones, shortcuts, and the checked pieces.
+An OpenAI API key is optional. Enter it in **API settings** under Tools (F3), or set `OPENAI_API_KEY` in the app's environment. Cloud coaching, speech, and transcription can incur API charges when used. For natural offline speech, run `uv run --locked --all-extras ada-piano voice-setup` once. Say “use natural offline voice” or “use system voice” to select local speech. F1 starts/retries conversation; Escape stops practice, sound, and calibration.
 
-## Current status and limits
+## Project limitations
 
-- **Software:** automated tests cover local commands, practice, GUI integration, camera/MIDI association, and session writes with fake devices. CI targets Linux and Windows with Python 3.11 and 3.12; GUI checks require Tk and a display.
-- **Accessibility and hardware:** this is voice operated, with native keyboard/text fallbacks. Screen-reader compatibility and independent use by blind learners are not yet validated. Real camera calibration, recognition while the piano/speakers are sounding, MIDI output, and Audiveris conversion need hardware trials. Microphone recognition is available on Linux and Windows, not macOS.
-- **Feedback:** MIDI captures key presses, not recorded piano audio. ADA does not grade pedal, dynamics, articulation, fingering, or posture. Timing feedback is relative to the learner's fitted tempo, not a complete interpretation of score tempo changes.
-- **Scores and camera:** supported notation is limited. Hand analysis requires a fixed camera, visible hands, and calibration; black keys need separate anchors. Stale, occluded, ambiguous, and out-of-range evidence is rejected. Moving the camera or piano requires recalibration; physical movement is not detected automatically.
-- **Sessions:** local JSON exports persist, but there is no session browser or automatic resume after reopening. On Linux they are under `$XDG_DATA_HOME/ada-piano/sessions` (default `~/.local/share/ada-piano/sessions`); see the guide for other platforms.
+### Accessibility and hardware
 
-## Detailed guides
+This is a prototype. Screen-reader compatibility and independent use by blind learners are not yet validated. Real camera calibration, microphone interruption while the piano/speakers are sounding, audible MIDI output, and Audiveris recognition need hardware trials. Automated checks use fake devices and synthetic observations; passing them does not establish hardware or accessibility readiness. CI targets Linux and Windows with Python 3.11 and 3.12; desktop GUI checks require Tk and a display.
 
-- [Voice-first practice](docs/ACCESSIBLE_PRACTICE.md)
-- [PDF and MusicXML import](docs/SCORE_IMPORT.md) and [supported notation](docs/MUSICXML.md)
-- [Camera setup and calibration](docs/CAMERA.md)
-- [Standalone ADA chat and voice setup](ada_piano/agent/USAGE.md)
+### Score import and reference playback
+
+PDF recognition requires a separate Audiveris installation; installing Python dependencies does not install it. Recognized music must be checked against a trusted source and explicitly approved before practice. The preview is a note/rest table, not rendered sheet music, and corrections require an external score editor. Direct photo import is not implemented. Original imports and conversion diagnostics remain in the working directory's `scores/` folder, including after failure or cancellation.
+
+Only partwise MusicXML is supported, with one selected instrument part at a time. Written-order mode plays repeat signs and alternate endings once in printed order; it does not expand them. Transposing parts, playback jumps, measure repeats, and microtonal pitches are rejected. XML documents are limited to 16 MiB.
+
+References use a single fixed tempo and do not interpret score tempo changes, pedal, dynamics, or fingering. Playback is limited to 4,096 notes and five minutes at the selected tempo. Overlapping notes of the same pitch/channel are rejected. A completed playback status means MIDI scheduling finished; it does not confirm audible piano output. Use the main **Stop** button or Escape to cancel an announced reference before it starts.
+
+### Performance feedback
+
+Guided practice checks note/chord attacks, not written rhythm. Play-through timing is measured against the learner's fitted tempo. MIDI captures key presses and releases, not piano audio; key-held duration is not audible duration under sustain. ADA does not grade pedal, dynamics, articulation, fingering, or posture.
+
+Play-through comparison accepts at most 600 expected notes. A take retains at most 1,200 played notes; additional note attacks are not recorded. Detailed problem reports cover at most 16 measures and five examples per category per measure. A take ends after about four seconds without MIDI activity once all keys are released, so a long pause can end it before the piece is finished. Use short passages for practice.
+
+### Camera setup and observations
+
+The camera adds fingertip proximity evidence, not proof of which finger pressed a key or whether technique is correct. It requires visible hands and a fixed camera and piano. To calibrate, say “start camera,” then “calibrate hands” for the right hand or “calibrate left hand.” Keep only that hand visible and use the same index finger to press three separated white keys spanning at least an octave, holding still for half a second and releasing between keys. Then press two separated black keys spanning at least seven semitones, or say “finish calibration” for white keys only.
+
+Only keys between each color's calibration anchors and near its fitted contact line are covered; this is not a full perspective model of the keyboard. Missing, stale, occluded, ambiguous, and out-of-range observations remain unknown. Camera timestamps reflect host acquisition; network-camera buffering is not compensated. Moving the camera or piano requires recalibration; physical movement is not detected automatically. Stopping, switching, or losing the camera clears calibration, and calibration is not restored after restart.
+
+Hand analysis covers at most 1,200 MIDI attacks and retains at most 24 detailed associations per take. Practice sessions do not save camera frames or raw landmarks. The separate standalone tracker can export landmarks when explicitly requested. Its MediaPipe model, `hand_landmarker.task`, is included in the repository; use `python -m ada_piano.camera --model /path/to/hand_landmarker.task` to select another copy.
+
+### Voice, AI, and saved sessions
+
+Microphone recognition is implemented on Linux and Windows, not macOS. Linux requires PipeWire `pw-record` or ALSA `arecord`, plus local faster-whisper or an API key for cloud transcription. Windows requires an installed English System.Speech recognizer. Offline voices and recognition models need initial downloads. Speech commands do not provide acoustic echo cancellation, and “ADA stop” depends on recognition latency; Escape provides an immediate keyboard stop. Say “stop listening” to disable the microphone.
+
+With an API key configured, Linux microphone clips may be sent for transcription before the wake prefix is checked, including background speech that does not trigger a reply. Cloud speech sends reply text, and coaching sends approved score context and measured summaries. Cancelled requests may already have incurred charges. AI advice is not independent evidence of what the learner played; core practice and local commands work without AI after local dependencies and models are installed.
+
+Sessions save as local JSON, but there is no session browser or automatic resume after reopening. “Replay” uses the latest play-through still in memory. Default export locations are:
+
+| Platform | Session folder |
+| --- | --- |
+| Linux | `$XDG_DATA_HOME/ada-piano/sessions`, defaulting to `~/.local/share/ada-piano/sessions` |
+| Windows | `%LOCALAPPDATA%/ada-piano/sessions` |
+| macOS | `~/Library/Application Support/ada-piano/sessions` |
