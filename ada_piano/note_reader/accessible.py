@@ -190,7 +190,10 @@ class AccessibleView(tk.Frame):
         self.transcript.pack(fill="both", expand=True)
         self.transcript.bind("<Tab>", self._next_control)
         self.transcript.bind("<Shift-Tab>", self._previous_control)
-        self.transcript.bind("<ISO_Left_Tab>", self._previous_control)
+        try:
+            self.transcript.bind("<ISO_Left_Tab>", self._previous_control)  # X11 sends this for Shift+Tab
+        except tk.TclError:
+            pass  # Windows and macOS Tk have no such keysym; <Shift-Tab> covers them
         self.transcript.bind("<Configure>", lambda event: self._show_words())
 
         # Packing order is priority: controls, state and ADA's words keep their room first;
@@ -454,6 +457,14 @@ class AccessibleView(tk.Frame):
                 canvas.configure(height=image.height())
             else:
                 canvas.configure(height=1)
+            return
+        if not self._smooth:  # without Pillow: the same evidence as plain Tk text
+            lines = [f"{'This take' if index == len(self._takes) - 1 else 'Last take'}: {take['score']}"
+                     for index, take in enumerate(self._takes)] + [self._takes[-1]["note"]]
+            item = canvas.create_text(0, 0, text="\n".join(line for line in lines if line), anchor="nw",
+                                      fill=INK, width=width, font=("", 13))
+            box = canvas.bbox(item)
+            canvas.configure(height=(box[3] - box[1] + 4) if box else 1)
             return
         compact = self._compact()
         rows = self._takes

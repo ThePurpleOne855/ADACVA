@@ -404,10 +404,11 @@ class ScorePanel(ttk.Frame):
         try:
             path = self._outputs[self.output.get()]
             self._parts = score_parts(path)
-            self.part_selector["values"] = tuple(f"{p['id']} — {p['name']}" for p in self._parts)
+            labels = tuple(f"{p['id']} — {p['name']}" for p in self._parts)
+            self.part_selector["values"] = labels
             preferred = next((i for i, part in enumerate(self._parts)
                               if "piano" in part["name"].casefold()), 0)
-            self.part.set(self.part_selector["values"][preferred])
+            self.part.set(labels[preferred])  # some Tk builds hand "values" back as one string
             self.select_part()
             self.preview_button.configure(state="normal")
             self.whole_button.configure(state="normal")

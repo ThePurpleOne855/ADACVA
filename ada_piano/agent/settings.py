@@ -14,10 +14,11 @@ _meta_key = None
 
 
 def key_file(name="openai_api_key"):
+    # Fall back to the home folder only when needed: Path.home() raises without HOME/USERPROFILE.
     if sys.platform == "win32":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
     else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
     return base / "ada-piano" / name
 
 
