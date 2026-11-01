@@ -27,6 +27,7 @@ class CameraFrame:
     # Same monotonic clock as MIDI timestamps (convert ns to seconds).
     captured_at_ns: int | None = None
     hand_landmarks: tuple[tuple[HandLandmark, ...], ...] = ()
+    handedness: tuple[str | None, ...] = ()
 
 
 def camera_frames(source: CameraSource, stop: Event):
@@ -76,6 +77,12 @@ def camera_frames(source: CameraSource, stop: Event):
                 )
                 landmarks = tuple(tuple(HandLandmark(point.x, point.y, point.z)
                                         for point in hand) for hand in result.hand_landmarks)
+                categories = getattr(result, "handedness", ())
+                labels = []
+                for index in range(len(landmarks)):
+                    category = categories[index][0] if index < len(categories) and categories[index] else None
+                    label = getattr(category, "category_name", "").lower()
+                    labels.append(label if label in {"left", "right"} and category.score >= 0.8 else None)
                 for hand in result.hand_landmarks:
                     draw_hand(frame, hand)
                 # Fit both dimensions, including portrait cameras, into the panel.
@@ -85,7 +92,7 @@ def camera_frames(source: CameraSource, stop: Event):
                 preview = cv2.cvtColor(preview, cv2.COLOR_BGR2RGB)
                 h, w = preview.shape[:2]
                 ppm = f"P6\n{w} {h}\n255\n".encode() + preview.tobytes()
-                yield CameraFrame(ppm, len(landmarks), frame, captured_at_ns, landmarks)
+                yield CameraFrame(ppm, len(landmarks), frame, captured_at_ns, landmarks, tuple(labels))
     finally:
         if camera is not None:
             camera.release()

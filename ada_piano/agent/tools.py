@@ -24,7 +24,8 @@ def select_passage(review, start_measure, end_measure):
     review.context()  # approval gate
     if not isinstance(start_measure, str) or not isinstance(end_measure, str):
         raise ValueError("Measure labels must be strings from the approved passage.")
-    labels = list(dict.fromkeys(e.measure for e in review.exercise.events))
+    labels = list(dict.fromkeys(item.measure for item in sorted(
+        (*review.exercise.events, *review.exercise.rests), key=lambda item: item.onset)))
     if start_measure not in labels or end_measure not in labels:
         raise ValueError("Requested measure is outside the approved passage.")
     first, last = labels.index(start_measure), labels.index(end_measure)
@@ -33,6 +34,8 @@ def select_passage(review, start_measure, end_measure):
     chosen = set(labels[first:last + 1])
     original = [e for e in review.exercise.events if e.measure in chosen]
     rests = [r for r in review.exercise.rests if r.measure in chosen]
+    if not original:
+        raise ValueError("The selected measures contain only rests. Include a measure with notes to practice.")
     origin = min([e.onset for e in original] + [r.onset for r in rests])
     events = tuple(replace(e, onset=e.onset - origin) for e in original)
     rests = tuple(replace(r, onset=r.onset - origin) for r in rests)
@@ -40,12 +43,13 @@ def select_passage(review, start_measure, end_measure):
 
 
 class AgentTools:
-    def __init__(self, review, summary=None, action=None, performance=None, catalog=None):
+    def __init__(self, review, summary=None, action=None, performance=None, catalog=None, *, hands=None):
         self.review = review
         self.summary = summary
         self.performance = performance
         self.action = action
         self.catalog = catalog
+        self.hands = hands
 
     def _pieces(self):
         if self.catalog is None:
@@ -55,7 +59,7 @@ class AgentTools:
     def dispatch(self, name, arguments):
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be an object.")
-        if name in {"get_current_passage", "get_attempt_summary", "get_performance_report",
+        if name in {"get_current_passage", "get_attempt_summary", "get_performance_report", "get_hand_summary",
                     "list_pieces", "stop_practice", "replay_my_playing"}:
             if arguments:
                 raise ValueError("This tool takes no arguments.")
@@ -65,6 +69,10 @@ class AgentTools:
                 return self.summary or {"status": "no_attempt"}
             if name == "get_performance_report":
                 return self.performance or {"status": "no_play_through"}
+            if name == "get_hand_summary":
+                return self.hands or {"status": "no_hand_evidence", "limitations":
+                                      "Calibrate the camera and play MIDI notes to collect inferred hand associations. "
+                                      "Finger correctness, posture and technique cannot be assessed."}
             if name == "list_pieces":
                 return {"pieces": [piece.describe() for piece in self._pieces()]}
             if name == "replay_my_playing" and not self.performance:
@@ -109,7 +117,7 @@ class AgentTools:
         review = result.pop("_review", None)
         if review is not None:
             # Later tools in this turn refer to the newly loaded passage.
-            self.review, self.summary, self.performance = review, None, None
+            self.review, self.summary, self.performance, self.hands = review, None, None, None
         return result
 
     def _action(self, name, arguments):

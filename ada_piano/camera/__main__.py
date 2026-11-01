@@ -82,7 +82,7 @@ def annotate(frame: object, result: object, cv2: object, mp: object) -> object:
 def main() -> int:
     args = parse_args()
     if not args.model.is_file():
-        print(f"Model missing: {args.model}. See docs/CAMERA.md for download instructions.", file=sys.stderr)
+        print(f"Model missing: {args.model}. See README.md for camera setup instructions.", file=sys.stderr)
         return 2
     try:
         import cv2

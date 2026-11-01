@@ -13,13 +13,21 @@ from ada_piano.playback.gui import PlaybackPanel
 from ada_piano.camera.gui import CameraPanel
 from ada_piano.score_import.gui import ScorePanel
 from ada_piano.agent.gui import CoachPanel
+from ada_piano.camera.analysis import HandAnalysis
+from ada_piano.sessions import SessionStore
+from ada_piano.note_reader.accessible import AccessibleView
+from ada_piano.note_reader.actions import VoiceControls
 
 
 class NoteReaderWindow:
     def __init__(self, root: tk.Tk, reader=None, demo=False, player=None, camera_worker=None,
-                 agent_client=None, voice=None, accessible=False):
+                 agent_client=None, voice=None, accessible=False, session_directory=None, microphone=None):
         self.root = root
         self.accessible = accessible
+        self.hands = HandAnalysis()
+        self.sessions = SessionStore(session_directory) if accessible or session_directory is not None else None
+        self.home = None
+        self.tools_visible = not accessible
         self.reader = reader if reader is not None else NoteReader()
         self.demo = False
         self._demo_step = 0
@@ -46,7 +54,8 @@ class NoteReaderWindow:
         self.workspace.add(panes, text="Piano & Camera")
         frame = ttk.Frame(panes, padding=16)
         panes.add(frame, weight=3)
-        self.camera = CameraPanel(panes, worker=camera_worker)
+        self.camera = CameraPanel(panes, worker=camera_worker, on_frame=self.hands.add_frame,
+                                  on_reset=self._camera_reset)
         panes.add(self.camera, weight=2)
         ttk.Label(frame, text="Note Reader", font=("", 24, "bold")).pack(anchor="w")
         ttk.Label(frame, text="Yamaha YPT-300 · MIDI input test · Middle C = C4 (60)").pack(anchor="w", pady=(0, 12))
@@ -76,7 +85,11 @@ class NoteReaderWindow:
         self.tabs.add(self.playback, text="Audible reference")
         self.score = ScorePanel(self.workspace, self.playback, connected=lambda: self.reader.connected and not self.demo)
         self.workspace.add(self.score, text="Scores · import & practice")
-        self.coach = CoachPanel(self.workspace, self.score, client=agent_client, voice=voice)
+        self.score.hand_analysis = self.hands
+        self.score.on_completed = self._save_completed
+        self.controls = VoiceControls(self)
+        self.coach = CoachPanel(self.workspace, self.score, client=agent_client, voice=voice,
+                                microphone=microphone, controls=self.controls.perform)
         self.workspace.add(self.coach, text="ADA Coach")
         columns = ("time", "event", "note", "midi", "velocity", "channel", "duration", "source")
         self.log = ttk.Treeview(log_frame, columns=columns, show="headings", height=4)
@@ -95,15 +108,22 @@ class NoteReaderWindow:
         self.selector.focus_set()
         self.coach.camera = self.camera_voice
         self._camera_said = None
-        for key, action in (("<F1>", self.talk), ("<F2>", self.toggle_import), ("<F5>", self.record),
+        for key, action in (("<F1>", self.talk), ("<F2>", self.toggle_import), ("<F3>", self.toggle_tools), ("<F5>", self.record),
                             ("<F6>", self.results), ("<F7>", self.toggle_camera), ("<Escape>", self.stop_all)):
             root.bind(key, lambda event, action=action: action() or "break")
         if accessible:
+            self.workspace.pack_forget()
+            self.home_status = tk.StringVar(value="Starting ADA. F1 to talk; Escape to stop.")
+            self.home = AccessibleView(root, submit=self.submit, talk=self.talk, stop=self.stop_all,
+                                       tools=self.toggle_tools, status=self.home_status)
+            self.home.pack(fill="both", expand=True)
+            self.coach.on_message = self.home.append
+            self.root.geometry("900x700")
+            self.root.minsize(700, 540)
             self.coach.use_best_voice()
             self.coach.conversation = True
             self.coach.speak.set(True)
-            self.workspace.select(self.coach)
-            self.coach.entry.focus_set()
+            self.home.focus_message()
         if demo:
             self.start_demo()
         else:
@@ -135,12 +155,73 @@ class NoteReaderWindow:
             self.coach.announce(text)
 
     def talk(self):
-        self.workspace.select(self.coach)
-        if self.coach.microphone.available:
-            self.coach.listen()
-        else:
-            self.coach.entry.focus_set()
+        if self.accessible:
+            self.coach.conversation = True
+        self.coach.listen()
+        if not self.coach.microphone.available:
+            if self.home is not None and not self.tools_visible:
+                self.home.focus_message()
+            else:
+                self.workspace.select(self.coach)
+                self.coach.entry.focus_set()
             self._announce("Type your message and press Enter.")
+
+    def submit(self, text):
+        self.coach.text.set(text)
+        self.coach.ask()
+
+    def toggle_tools(self, visible=None):
+        if self.home is None:
+            return
+        self.tools_visible = not self.tools_visible if visible is None else visible
+        if self.tools_visible:
+            self.home.pack_forget()
+            self.workspace.pack(fill="both", expand=True)
+            self.root.minsize(1100, 760)
+            self.root.geometry("1400x850")
+            self.workspace.select(self.coach)
+            self.coach.entry.focus_set()
+        else:
+            self.workspace.pack_forget()
+            self.home.pack(fill="both", expand=True)
+            self.root.minsize(700, 540)
+            self.root.geometry("900x700")
+            self.home.focus_message()
+        self._announce("Tools open. Press F3 or say hide tools to return." if self.tools_visible else "Practice screen.")
+
+    def _camera_reset(self, reason):
+        previously_ready = self.hands.calibrated or self.hands.calibrating
+        message = self.hands.reset(reason)
+        if previously_ready and hasattr(self, "coach"):
+            self._announce(message)
+
+    def _save_completed(self, snapshot):
+        if self.sessions is not None:
+            self.sessions.save(snapshot)
+
+    def _saved_sessions(self):
+        if self.sessions is not None:
+            for path, error, announce in self.sessions.drain():
+                if error:
+                    self.coach.announce(error)
+                elif announce:
+                    self.coach.announce("Session saved in your local ADA sessions folder.")
+                    self.coach._append("Saved file", path)
+
+    def _home_state(self):
+        if self.home is None:
+            return
+        if self.score.take is not None:
+            status = "Recording. Pause four seconds for results; say ADA stop to finish."
+        elif self.score.tutor is not None:
+            status = "Guided practice. Follow the spoken notes; say ADA stop to finish."
+        elif not self.coach._speech_done.is_set():
+            status = "ADA is speaking. Say ADA stop or press Escape to interrupt."
+        elif self.coach._thread is not None and self.coach._thread.is_alive():
+            status = "ADA is thinking. Say ADA stop or press Escape to cancel."
+        else:
+            status = self.coach.microphone_status.get()
+        self.home_status.set(status[:180])
 
     def camera_voice(self, on=True):
         """Start/stop the camera by voice; progress is announced from _tick."""
@@ -167,12 +248,15 @@ class NoteReaderWindow:
         elif tracking:
             self._camera_said = None
             count = int(tracking.group(1))
-            self._announce(f"Camera is on. I can see {'one hand' if count == 1 else f'{count} hands'}.")
+            if not self.hands.calibrating:
+                self._announce(f"Camera is on. I can see {'one hand' if count == 1 else f'{count} hands'}.")
         elif "No hands" in status and self._camera_said == "starting":
             self._camera_said = "no hands"
             self._announce("Camera is on, but I can't see your hands yet. Move them under the camera.")
 
     def toggle_import(self):
+        if self.home is not None and not self.tools_visible:
+            self.toggle_tools(True)
         self.score.show_import.set(not self.score.show_import.get())
         self.score._toggle_import()
         self.workspace.select(self.score)
@@ -182,7 +266,8 @@ class NoteReaderWindow:
         self.score.play_through()
 
     def results(self):
-        self.workspace.select(self.coach)
+        if self.tools_visible:
+            self.workspace.select(self.coach)
         self.coach.text.set("How did I do?")
         self.coach.ask()
 
@@ -190,6 +275,8 @@ class NoteReaderWindow:
         take = self.score.take
         self.coach.stop()
         self.playback.stop()
+        if self.hands.calibrating:
+            self._announce(self.hands.cancel_calibration())
         if take is None or not take.notes:  # otherwise the take's results were just announced
             self._announce("Stopped.")
 
@@ -316,6 +403,8 @@ class NoteReaderWindow:
         self.playback.play_note(pitch)
 
     def _record(self, event, source="Piano"):
+        if source == "Piano":
+            self.hands.observe(event.kind, event.note, event.velocity, event.channel, event.timestamp)
         self.score.observe(event, source)
         if event.kind == "on" and source != "Reference":
             self._last_played = event.note
@@ -358,6 +447,10 @@ class NoteReaderWindow:
                 self._record(NoteEvent(event.kind, event.note, event.velocity, event.channel,
                                        event.timestamp, event.duration), source="Reference")
             self._show_state()
+            for message in self.hands.tick(now):
+                self.coach.announce(message)
+            self._saved_sessions()
+            self._home_state()
             if self.accessible:
                 self._watch_camera()
         except Exception as exc:
@@ -369,6 +462,16 @@ class NoteReaderWindow:
     def close(self):
         if self._closed:
             return
+        self.score.stop_practice()
+        if self.sessions is not None:
+            snapshot = self.score.session_snapshot()
+            if snapshot is not None:
+                self.sessions.save(snapshot)
+            failures = [error for _, error, _ in self.sessions.flush() if error]
+            if failures:
+                self.coach.announce(failures[-1] + " ADA is still open with your latest session. "
+                                    "Fix the folder or disk space, then say save session and quit again.")
+                return
         self._closed = True
         if self._timer is not None:
             self.root.after_cancel(self._timer)
@@ -382,12 +485,19 @@ class NoteReaderWindow:
                 self.camera.close()
             finally:
                 try:
-                    self.playback.player.close()
+                    if self.sessions is not None:
+                        self.sessions.close()
+                        self._saved_sessions()
                 finally:
                     try:
-                        self.reader.disconnect()
+                        self.playback.player.close()
                     finally:
-                        self.root.destroy()
+                        try:
+                            self.reader.disconnect()
+                        finally:
+                            if self.home is not None:
+                                self.home.close()
+                            self.root.destroy()
 
 
 def launch(demo=False):

@@ -11,6 +11,7 @@ MEASURES = {"start_measure": {"type": "string"}, "end_measure": {"type": "string
 TOOLS = [
     tool("get_current_passage", "Read only the approved score passage and its limitations.", {}),
     tool("get_attempt_summary", "Read measured performance facts, or a no-attempt result.", {}),
+    tool("get_hand_summary", "Read calibrated camera/MIDI associations and uncertainty; never proof of correct fingering or posture.", {}),
     tool("play_reference", "Request approved measures at a safe tempo. Application announces before sound.",
          {**MEASURES, "tempo": {"type": "number", "minimum": 20, "maximum": 300}}),
     tool("start_practice", "Start guided pitch/chord practice on approved measure labels, after reference ends.", MEASURES),

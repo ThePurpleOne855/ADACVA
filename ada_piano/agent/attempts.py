@@ -1,6 +1,7 @@
 """In-memory attempts and bounded deterministic summaries; no sensor uploads."""
 
 from dataclasses import asdict
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from time import monotonic
@@ -13,10 +14,12 @@ class AttemptRecorder:
             raise ValueError("An approved passage is required.")
         self.context = {k: v for k, v in context.items() if k != "musicxml"}
         self.attempt_id = str(uuid4())
+        self.recorded_at = datetime.now(timezone.utc).isoformat()
         self.started_at = monotonic() if started_at is None else started_at
         self.ended_at = None
         self.results = []
         self.feedback = []
+        self.hand_analysis = None
 
     def record(self, result):
         if self.ended_at is not None:
@@ -56,13 +59,15 @@ class AttemptRecorder:
                 "events_completed": len(correct), "correct_first_try": len(correct - troubled),
                 "complete": any(r.complete for r in self.results),
                 "problems": sorted(groups.values(), key=lambda p: -p["occurrences"]),
-                "limitations": "Guided pitch/chord attacks only; no rhythm or calibrated fingering judgment. MIDI timestamps currently reflect GUI polling."}
+                "limitations": "Guided pitch/chord attacks only; no rhythm or fingering correctness judgment. MIDI messages are timestamped on arrival."}
 
     def snapshot(self):
         return {"schema_version": 1, "attempt_id": self.attempt_id,
+                "recorded_at": self.recorded_at,
                 "score": self.context, "start_monotonic": self.started_at,
                 "end_monotonic": self.ended_at, "results": [asdict(r) for r in self.results],
-                "summary": self.summary(), "feedback": list(self.feedback)}
+                "summary": self.summary(), "feedback": list(self.feedback),
+                "hand_analysis": self.hand_analysis}
 
     def save(self, path):
         """Explicit export: caller must invoke outside the MIDI/UI thread."""

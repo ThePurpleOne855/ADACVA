@@ -43,6 +43,8 @@ jobs:
         run: uv run --no-sync python -m unittest ada_piano.agent.test_input -v
       - name: Run agent reliability tests
         run: uv run --no-sync python -m unittest ada_piano.agent.test_reliability -v
+      - name: Run voice control and hand evidence tests
+        run: uv run --no-sync python -m unittest ada_piano.agent.test_controls -v
       - name: Run cloud voice tests
         run: uv run --no-sync python -m unittest ada_piano.agent.test_cloud_voice -v
       - name: Run Linux voice tests

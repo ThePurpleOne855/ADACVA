@@ -10,13 +10,16 @@ from ada_piano.camera.devices import best_camera, camera_choices
 
 
 class CameraPanel(ttk.LabelFrame):
-    def __init__(self, parent, worker=None):
+    def __init__(self, parent, worker=None, on_frame=None, on_reset=None):
         super().__init__(parent, text="Camera · hand tracking", padding=12)
         self.worker = worker if worker is not None else CameraWorker()
         self.controller = CameraController(self.worker)
         self._photo = None
         self._closed = False
         self._notice = None
+        self.on_frame = on_frame
+        self.on_reset = on_reset
+        self._tracking_active = False
         self.source = tk.StringVar(value="0")
         self.selection = self.source
         self._choices = {}
@@ -72,7 +75,10 @@ class CameraPanel(ttk.LabelFrame):
         try:
             text = self.source.get()
             source = parse_camera_source(self._choices.get(text, text))
+            if (not self.worker.running or source != self.controller.active) and self.on_reset:
+                self.on_reset("Camera source changed. Calibrate again before hand analysis.")
             self.controller.start(source)
+            self._tracking_active = True
         except Exception as exc:
             self._notice = f"Camera error: {exc}"
             self.status.set(self._notice)
@@ -84,6 +90,9 @@ class CameraPanel(ttk.LabelFrame):
     def stop(self):
         self._notice = None
         self.controller.stop()
+        self._tracking_active = False
+        if self.on_reset:
+            self.on_reset("Camera stopped. Hand calibration was cleared.")
         self._clear_preview()
 
     def _clear_preview(self):
@@ -96,15 +105,24 @@ class CameraPanel(ttk.LabelFrame):
             self.status.set(self._notice or status)
             self.start_button.configure(text="Switch camera" if self.worker.running else "Start camera")
             if frame is not None:
+                if self.on_frame:
+                    self.on_frame(frame)
                 self._photo = tk.PhotoImage(master=self, data=frame.ppm, format="PPM")
                 self.preview.configure(image=self._photo, text="")
             elif not self.worker.running:
                 self._clear_preview()
+                if self._tracking_active and self.controller.pending is None:
+                    self._tracking_active = False
+                    if self.on_reset:
+                        self.on_reset("Camera unavailable. Hand calibration was cleared.")
         except Exception as exc:
             self.controller.stop()
             self._clear_preview()
             self._notice = f"Camera preview error: {exc}"
             self.status.set(self._notice)
+            if self._tracking_active and self.on_reset:
+                self.on_reset("Camera preview failed. Hand calibration was cleared.")
+            self._tracking_active = False
         finally:
             if not self._closed:
                 self._timer = self.after(50, self._tick)

@@ -83,10 +83,12 @@ class CameraPanelInputTests(unittest.TestCase):
         for text, expected in [("0", 0), ("2", 2), ("/dev/video2", "/dev/video2")]:
             with self.subTest(source=text):
                 panel = SimpleNamespace(source=MagicMock(), controller=MagicMock(), status=MagicMock(),
+                                        worker=SimpleNamespace(running=False), on_reset=MagicMock(),
                                         _choices={}, _clear_preview=MagicMock())
                 panel.source.get.return_value = text
                 CameraPanel.start(panel)
                 panel.controller.start.assert_called_once_with(expected)
+                panel.on_reset.assert_called_once()
                 self.assertIsNone(panel._notice)
 
     def test_invalid_source_does_not_start_worker(self):

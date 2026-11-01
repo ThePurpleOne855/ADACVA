@@ -181,7 +181,8 @@ class CameraCaptureTests(unittest.TestCase):
         tracker = mp.tasks.vision.HandLandmarker.create_from_options.return_value.__enter__.return_value
         def detect(*args):
             timeline.append("inference")
-            return SimpleNamespace(hand_landmarks=[[point]])
+            return SimpleNamespace(hand_landmarks=[[point]],
+                                   handedness=[[SimpleNamespace(category_name="Left", score=0.95)]])
         tracker.detect_for_video.side_effect = detect
         def clock():
             timeline.append("acquisition")
@@ -198,6 +199,7 @@ class CameraCaptureTests(unittest.TestCase):
         self.assertEqual(timeline, ["read", "acquisition", "inference"])
         self.assertEqual(captured.captured_at_ns, 123_456_789)
         self.assertEqual(captured.hands, 1)
+        self.assertEqual(captured.handedness, ("left",))
         self.assertEqual(captured.hand_landmarks, ((HandLandmark(0.1, 0.2, -0.3),),))
         point.x = 0.9
         self.assertEqual(captured.hand_landmarks[0][0].x, 0.1)
