@@ -256,6 +256,7 @@ class LinuxSpeechInput:
             raise RuntimeError("No recording tool")
         environment = dict(os.environ)
         environment.pop("OPENAI_API_KEY", None)
+        environment.pop("MODEL_API_KEY", None)
         process = None
         launch = asyncio.create_task(asyncio.create_subprocess_exec(
             *command, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,

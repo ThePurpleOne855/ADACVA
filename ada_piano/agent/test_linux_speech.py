@@ -161,9 +161,10 @@ class LinuxSpeechTests(unittest.TestCase):
         process = NS(stdout=reader, returncode=None, terminate=Mock(), wait=AsyncMock(return_value=0))
         with patch("ada_piano.agent.linux_speech_input.recording_command", return_value=["fake"]), \
              patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as launch, \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "secret"}):
+             patch.dict(os.environ, {"OPENAI_API_KEY": "secret", "MODEL_API_KEY": "meta-secret"}):
             self.assertIsNone(asyncio.run(service._capture()))
         self.assertNotIn("OPENAI_API_KEY", launch.call_args.kwargs["env"])
+        self.assertNotIn("MODEL_API_KEY", launch.call_args.kwargs["env"])
         process.terminate.assert_called_once()
 
     def test_capture_cancellation_reaps_process(self):

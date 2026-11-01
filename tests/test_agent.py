@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from ada_piano.ai_tutor import Tutor
 from ada_piano.agent.attempts import AttemptRecorder
-from ada_piano.agent.coach import Coach, OpenAIClient
+from ada_piano.agent.coach import AgentSetupError, Coach, OpenAIClient, error_message
+from ada_piano.agent.schemas import TOOLS
 from ada_piano.agent.tools import AgentTools, passage_context, select_passage
 from ada_piano.music_sheet import Exercise, ScoreEvent, ScoreNote
 from ada_piano.sound_sensor import NoteEvent
@@ -207,14 +208,79 @@ class AgentTests(unittest.TestCase):
 
     def test_responses_adapter_configuration_without_network(self):
         sdk = NS(OpenAI=unittest.mock.Mock())
-        with patch.dict("sys.modules", {"openai": sdk}), patch.dict("os.environ", {"OPENAI_API_KEY": "test-only-not-a-key", "ADA_OPENAI_MODEL": "configured-model"}):
+        # clear=True and no saved Meta key: a developer's own MODEL_API_KEY must not switch providers here.
+        with patch.dict("sys.modules", {"openai": sdk}), patch("ada_piano.agent.settings._meta_key", None), \
+                patch.dict("os.environ", {"OPENAI_API_KEY": "test-only-not-a-key", "ADA_OPENAI_MODEL": "configured-model"}, clear=True):
             client = OpenAIClient()
             client.respond([], [])
+        self.assertIsNone(sdk.OpenAI.call_args.kwargs["base_url"])  # OpenAI's default endpoint
         request = sdk.OpenAI.return_value.responses.create.call_args.kwargs
         self.assertEqual(request["model"], "configured-model")
         self.assertFalse(request["store"])
         self.assertFalse(request["parallel_tool_calls"])
         self.assertIn("instructions", request)
+        self.assertNotIn("reasoning", request)
+        self.assertNotIn("include", request)
+
+    def test_muse_spark_uses_meta_endpoint_saved_key_and_low_reasoning(self):
+        """Simulated SDK only: proves the request shape, not that Meta's live API accepts it."""
+        sdk = NS(OpenAI=unittest.mock.Mock())
+        with patch.dict("sys.modules", {"openai": sdk}), patch("ada_piano.agent.settings._meta_key", "test-only-meta"), \
+                patch.dict("os.environ", {"OPENAI_API_KEY": "test-only-openai"}, clear=True):
+            client = OpenAIClient(api_key="session-openai-key")  # the API settings key belongs to OpenAI voice
+            client.respond([{"role": "user", "content": "How did I do?"}], TOOLS)
+        self.assertEqual(sdk.OpenAI.call_args.kwargs["base_url"], "https://api.meta.ai/v1")
+        self.assertEqual(sdk.OpenAI.call_args.kwargs["api_key"], "test-only-meta")
+        request = sdk.OpenAI.return_value.responses.create.call_args.kwargs
+        self.assertEqual(request["model"], "muse-spark-1.3")
+        self.assertEqual(request["reasoning"], {"effort": "low"})
+        self.assertEqual(request["include"], ["reasoning.encrypted_content"])
+        self.assertFalse(request["store"])
+        self.assertIs(request["tools"], TOOLS)
+        self.assertIn("instructions", request)
+
+    def test_environment_meta_key_and_model_override(self):
+        sdk = NS(OpenAI=unittest.mock.Mock())
+        env = {"MODEL_API_KEY": "test-only-env-meta", "ADA_META_MODEL": "muse-spark-1.1"}
+        with patch.dict("sys.modules", {"openai": sdk}), patch("ada_piano.agent.settings._meta_key", "saved-meta"), \
+                patch.dict("os.environ", env, clear=True):
+            client = OpenAIClient()
+        self.assertEqual(client.model, "muse-spark-1.1")
+        self.assertEqual(sdk.OpenAI.call_args.kwargs["api_key"], "test-only-env-meta")
+
+    def test_muse_model_without_meta_key_is_a_spoken_setup_error(self):
+        with patch("ada_piano.agent.settings._meta_key", None), \
+                patch.dict("os.environ", {"OPENAI_API_KEY": "test-only-openai"}, clear=True), \
+                self.assertRaises(AgentSetupError) as caught:
+            OpenAIClient(api_key="session-openai-key", model="muse-spark-1.3")
+        self.assertEqual(caught.exception.category, "meta_key")
+        self.assertIn("no Meta API key is saved", error_message(caught.exception, "Meta"))
+
+    def test_meta_errors_name_meta_and_timeouts_stay_local(self):
+        for status, expected in [(401, "Meta rejected the API key"), (429, "Meta's rate limit"),
+                                 (400, "Meta rejected the request format"), (503, "Meta reported a server error")]:
+            error = RuntimeError("private response body")
+            error.status_code, error.code = status, None
+            message = error_message(error, "Meta")
+            self.assertIn(expected, message)
+            self.assertNotIn("OpenAI", message)
+            self.assertNotIn("private", message)
+        timeout = type("APITimeoutError", (Exception,), {})("Request timed out after 30 s")
+        self.assertIn("could not connect or timed out", error_message(timeout, "Meta"))
+
+    def test_reasoning_items_replay_before_tool_results(self):
+        """Muse Spark returns reasoning before a tool call; Meta rejects a replay that separates them."""
+        reasoning = NS(type="reasoning", id="rs_1", summary=[], encrypted_content="opaque")
+        tool_call = NS(type="function_call", name="get_attempt_summary", arguments="{}", call_id="call_7")
+        client = FakeClient([NS(output=[reasoning, tool_call], output_text=""), answer()])
+        coach = Coach(AgentTools(Review(), demo_attempt().summary()), client)
+        self.assertEqual(coach.ask("What should I practice?"), "Try measure six next.")
+        replay = client.requests[1][0]
+        start = replay.index(reasoning)
+        self.assertIs(replay[start + 1], tool_call)
+        self.assertEqual(replay[start + 2]["call_id"], "call_7")
+        self.assertEqual(replay[start + 2]["type"], "function_call_output")
+        self.assertIn('"type": "wrong_note", "measure": "6"', replay[start + 2]["output"])
 
     def test_reference_duration_limits_still_enforced(self):
         review = Review()

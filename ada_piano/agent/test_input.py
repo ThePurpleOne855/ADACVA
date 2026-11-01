@@ -61,11 +61,12 @@ class InputTests(unittest.TestCase):
                  b'{"kind":"text","text":"ADA help me","confidence":0.9}\n'
                  b'{"kind":"text","text":"wrong words","confidence":0.1}\n')
         service, _, popen = self.service(lines)
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "secret"}):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "secret", "MODEL_API_KEY": "meta-secret"}):
             service.start(continuous=True)
             service._thread.join(1)
         self.assertEqual(service.drain(), ["ADA help me"])
         self.assertNotIn("OPENAI_API_KEY", popen.call_args.kwargs["env"])
+        self.assertNotIn("MODEL_API_KEY", popen.call_args.kwargs["env"])
         self.assertEqual(popen.call_args.kwargs["env"]["ADA_MIC_CONTINUOUS"], "1")
 
     def test_error_falls_back_to_text_and_explicit_retry(self):
@@ -159,6 +160,36 @@ class StandaloneGuiTests(unittest.TestCase):
         self.panel.ask()
         self.settle()
         self.assertIn("Start with middle C", self.panel.transcript.get("1.0", "end"))
+
+    def keyless_panel(self, meta_key):
+        """A real coach panel with no injected client and no keys except an optional saved Meta key."""
+        from .gui import CoachPanel
+        env = {k: v for k, v in os.environ.items() if k not in ("MODEL_API_KEY", "OPENAI_API_KEY", "ADA_META_MODEL")}
+        with patch("ada_piano.agent.settings._meta_key", meta_key), patch.dict(os.environ, env, clear=True):
+            panel = CoachPanel(self.root, voice=FakeVoice(), microphone=FakeMicrophone())
+        self.addCleanup(panel.close)
+        return panel
+
+    def test_saved_meta_key_makes_muse_spark_the_default_coach(self):
+        with patch("ada_piano.agent.settings._meta_key", "test-only-meta"):
+            panel = self.keyless_panel("test-only-meta")
+            self.assertEqual(panel._model, "muse-spark-1.3")
+            self.assertTrue(panel._api_configured())  # no OpenAI key needed for Muse Spark coaching
+            self.assertEqual(panel.connection.get(), "API key: set · Model: muse-spark-1.3")
+
+    def test_muse_model_without_meta_key_is_explained_not_crashed(self):
+        panel = self.keyless_panel(None)
+        self.assertNotEqual(panel._model, "muse-spark-1.3")  # no Meta key: OpenAI stays the default
+        panel._model = "muse-spark-1.3"  # e.g. typed into API settings before saving the key
+        panel._update_connection()
+        self.assertEqual(panel.connection.get(), "API key: missing · Model: muse-spark-1.3")
+        with patch("ada_piano.agent.settings._meta_key", None):
+            panel.text.set("Why do my fingers feel slow?")
+            panel.ask()
+            panel._thread.join(1)
+        panel.after_cancel(panel._timer)
+        panel._poll()
+        self.assertIn("no Meta API key is saved", panel.transcript.get("1.0", "end"))
 
     def test_settings_and_labelled_input_present(self):
         self.microphone.configure = Mock()
