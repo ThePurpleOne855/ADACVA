@@ -17,7 +17,8 @@ from ada_piano.camera.analysis import HandAnalysis
 from ada_piano.sessions import SessionStore
 from ada_piano import pieces
 from ada_piano.note_reader import lettering
-from ada_piano.note_reader.accessible import INK, AccessibleView, take_cells, take_note
+from ada_piano.note_reader.accessible import INK, ROOMS, AccessibleView, take_cells, take_note
+from ada_piano.agent.coach import is_meta
 from ada_piano.note_reader.actions import VoiceControls
 from ada_piano.note_reader.theme import style_tools
 
@@ -40,6 +41,7 @@ class NoteReaderWindow:
         self._closed = False
         self._last_played = None
         self._user_disconnected = False
+        self._last_key = None
         self.root.title("Piano & Camera — ADA Piano Teacher")
         self.root.geometry("1400x850")
         self.root.minsize(1100, 760)
@@ -126,10 +128,12 @@ class NoteReaderWindow:
             for key, step in (("<Control-plus>", 1), ("<Control-equal>", 1), ("<Control-KP_Add>", 1),
                               ("<Control-minus>", -1), ("<Control-KP_Subtract>", -1), ("<Control-0>", 0)):
                 root.bind(key, lambda event, step=step: self.text_size(step) or "break")
+            for number, (room, _) in enumerate(ROOMS, 1):  # Ctrl+1 Practice ... Ctrl+5 Voice & AI
+                root.bind(f"<Control-Key-{number}>", lambda event, room=room: self.open_room(room) or "break")
             self.root.geometry("900x700")
             self.root.minsize(700, 540)
             self.coach.use_best_voice()
-            self.coach.conversation = True
+            self.coach.wake_default = self.coach.wake_word = True  # always listening for "ADA ..."
             self.coach.speak.set(True)
             self.home.focus_message()
         if demo:
@@ -152,7 +156,8 @@ class NoteReaderWindow:
         """ADA opens the session: ask what to practice and read the catalog."""
         titles = [piece.title for piece in self.score.catalog]
         listening = self.coach.microphone.available
-        answer = "Just say its name." if listening else "Type its name and press Enter."
+        answer = ("Just say its name. After that, start with ADA whenever you want something, like ADA, record."
+                  if listening else "Type its name and press Enter.")
         self._announce(f"Hi, I'm Ada. {piano} What would you like to practice today? "
                        f"I have {', and '.join(titles)}. {answer} "
                        "You can press F1 to talk to me any time, or say help.")
@@ -165,7 +170,7 @@ class NoteReaderWindow:
 
     def talk(self):
         if self.accessible:
-            self.coach.conversation = True
+            self.coach.wake_word = True  # F1 also turns the wake word back on after "stop listening"
         self.coach.listen()
         if not self.coach.microphone.available:
             if self.home is not None and not self.tools_visible:
@@ -212,6 +217,88 @@ class NoteReaderWindow:
             report = snapshot["report"]
             self.home.show_take(take_cells(exercise, report), report["correct"], report["notes_expected"],
                                 key=(snapshot["score_sha256"], repr(snapshot["selection"])), note=take_note(report))
+
+    def open_room(self, room):
+        """Open a room on the practice screen; returns the spoken reply."""
+        if self.home is None:
+            return "Rooms are on the practice screen."
+        if self.tools_visible:
+            self.toggle_tools(False)
+        self.home.open_room(room)
+        self._rooms_state()
+        name = dict(ROOMS)[room]
+        if room == "pieces":
+            return f"{name} open. " + "; ".join(p.title for p in self.score.catalog) + "."
+        return f"{name} open."
+
+    def _rooms_state(self):
+        """Rail lamps and room content from live state; the view redraws only what changed."""
+        home, connected = self.home, self.reader.connected and not self.demo
+        piece = self._piece_line()
+        takes = home._takes
+        take = takes[-1] if takes else None
+        coach = self.coach
+        coach_ready = coach._api_configured()
+        coach_name = ("Meta Muse Spark" if is_meta(coach._model) else "OpenAI") + f" ({coach._model})"
+        listening = coach.wake_word and coach.microphone.available
+        camera_on = self.camera.worker.running
+        key = self._last_key
+        home.set_rail("practice", f"Last take {take['score']}" if take else ("Ready to record" if piece else
+                                  "No piece yet"), bool(piece))
+        home.set_rail("piano", f"Connected · last key {key}" if connected and key else
+                      "Connected · press a key" if connected else "Not connected", connected)
+        home.set_rail("pieces", piece.split(" · ")[0] if piece else "Choose a piece", bool(piece))
+        home.set_rail("camera", "On" if camera_on else "Off", camera_on)
+        home.set_rail("voice", ("Muse Spark ready" if is_meta(coach._model) else "Coach ready") if coach_ready
+                      and listening else "Listening for ADA" if listening else "Microphone off", coach_ready and listening)
+        if connected:
+            heard = (f"Last key you played: {key}" if key else
+                     "No keys yet. Press any key; it will show here." if self.reader.message_count else
+                     "Nothing from the piano yet. Check that the plug marked MIDI IN is in the piano's MIDI OUT.")
+            piano_lines = [("Piano connected", "lead"), (heard, "lead"), (f"Input: {self.reader.port_name}", "line"),
+                           (f"Sound plays through: {self.playback.output.get() or 'nothing selected'}", "line"),
+                           (f"Tempo: {self.playback.tempo.get()} beats per minute", "line")]
+            piano_actions = [("Test sound", "test sound", lambda: self.submit("test sound")),
+                             ("Slower", "slower", lambda: self.submit("slower")),
+                             ("Faster", "faster", lambda: self.submit("faster")),
+                             ("MIDI inputs", "list MIDI inputs", lambda: self.submit("list MIDI inputs"))]
+        else:
+            piano_lines = [("Piano not connected", "lead"),
+                           ("Plug in the USB MIDI interface; I connect by myself. On the YPT-300, PC mode must be "
+                            "oFF (hold DEMO).", "line")]
+            piano_actions = [("Connect piano", "connect piano", lambda: self.submit("connect piano")),
+                             ("MIDI inputs", "list MIDI inputs", lambda: self.submit("list MIDI inputs"))]
+        home.set_room("piano", "Piano", piano_lines, piano_actions)
+        piece_lines = [(piece or "No piece loaded yet. Choose one below.", "lead")]
+        if take:
+            piece_lines.append((f"Last take {take['score']}. {take['note']}", "line"))
+        piece_actions = [(p.title.split(" (")[0], f"practice {p.title.split(' (')[0].lower()}",
+                          lambda title=p.title: self.submit(f"practice {title}")) for p in self.score.catalog]
+        if piece:
+            piece_actions += [(label, label.lower(), lambda words=label.lower(): self.submit(words))
+                              for label in ("Play it for me", "Record", "Guided practice", "Right hand",
+                                            "Left hand", "Both hands")]
+        home.set_room("pieces", "Pieces", piece_lines, piece_actions)
+        calibrating = self.hands.calibrating
+        camera_actions = [("Stop camera", "stop camera", lambda: self.submit("stop camera")) if camera_on else
+                          ("Start camera", "start camera", lambda: self.submit("start camera")),
+                          ("Finish calibration", "finish calibration", lambda: self.submit("finish calibration"))
+                          if calibrating else ("Calibrate hands", "calibrate hands",
+                                               lambda: self.submit("calibrate hands")),
+                          ("Hand report", "hand report", lambda: self.submit("hand report"))]
+        home.set_room("camera", "Camera", [(self.camera.status.get() or ("Camera on" if camera_on else "Camera off"),
+                                            "lead"), (self.hands.status, "line")], camera_actions)
+        voice_lines = [(f"Coach: {coach_name}, " + ("ready" if coach_ready else "needs an API key"), "lead"),
+                       ('Listening for "ADA". Start with ADA, then what you want.' if listening else
+                        "Microphone off. Press F1 or the button below to listen again.", "lead"),
+                       (f"Voice: {coach.voice_choice.get()}", "line"),
+                       (f"Text size {round(home.scale * 100)} percent", "line")]
+        voice_actions = [("Stop listening", "stop listening", lambda: self.submit("stop listening")) if listening
+                         else ("Listen for ADA", "start listening", lambda: self.submit("start listening")),
+                         ("Bigger text", "bigger text", lambda: self.submit("bigger text")),
+                         ("Smaller text", "smaller text", lambda: self.submit("smaller text")),
+                         ("API settings", "", coach.api_settings)]
+        home.set_room("voice", "Voice & AI", voice_lines, voice_actions)
 
     def text_size(self, step):
         """Bigger (+1), smaller (-1) or normal (0) text on the practice screen; returns the spoken reply."""
@@ -274,6 +361,7 @@ class NoteReaderWindow:
         self.home_status.set(status[:180])
         self.home.set_context(piano="Piano connected" if self.reader.connected and not self.demo
                               else "Piano not connected", piece=self._piece_line())
+        self._rooms_state()
 
     def camera_voice(self, on=True):
         """Start/stop the camera by voice; progress is announced from _tick."""
@@ -325,6 +413,8 @@ class NoteReaderWindow:
 
     def stop_all(self):
         take = self.score.take
+        if self.home is not None:
+            self.home.open_room("practice")  # Escape always comes home
         self.coach.stop()
         self.playback.stop()
         if self.hands.calibrating:
@@ -479,6 +569,7 @@ class NoteReaderWindow:
         self.score.observe(event, source)
         if event.kind == "on" and source != "Reference":
             self._last_played = event.note
+            self._last_key = event.name
         if source != "Reference":
             self.latest.set(f"{event.name}  {'pressed' if event.kind == 'on' else 'released'}")
             self.details.set(f"MIDI {event.note}   Velocity {event.velocity}   Channel {event.channel}")

@@ -24,6 +24,8 @@ COMPACT_HEIGHT = 760  # shorter windows show one take row so ADA's words keep th
 LIVE = {"Listening", "Recording", "Guided practice", "Speaking", "Thinking", "Hearing you"}
 SUBLINE = {"Recording", "Guided practice", "Voice input stopped", "Ready"}  # states whose sentence adds an instruction
 PLACEHOLDER = "Type to ADA, or press F1 and speak"
+ROOMS = (("practice", "Practice"), ("piano", "Piano"), ("pieces", "Pieces"), ("camera", "Camera"),
+         ("voice", "Voice & AI"))
 
 
 def state_word(status):
@@ -88,8 +90,57 @@ def take_note(report):
     return "Every note right."
 
 
+class Room(tk.Frame):
+    """One tool room on the plate: a title, its status in large type, a few big buttons, ADA's latest reply."""
+
+    def __init__(self, view, parent):
+        super().__init__(parent, background=PLATE)
+        self.view = view
+        self._key = None
+        self._buttons = []
+        self.title_label = tk.Label(self, background=PLATE, borderwidth=0, anchor="w")
+        self.title_label.pack(fill="x")
+        self.lines = tk.Frame(self, background=PLATE)
+        self.lines.pack(fill="x", pady=(CELL // 2, 0))
+        self.actions = tk.Frame(self, background=PLATE)
+        self.actions.pack(fill="x", pady=(CELL, 0))
+        self.actions.columnconfigure((0, 1), weight=1, uniform="action")
+        self.reply_label = tk.Label(self, background=PLATE, borderwidth=0, anchor="w", justify="left")
+        self.reply_label.pack(side="bottom", fill="x")
+
+    def show(self, title, lines, actions, reply, width, force=False):
+        """lines: (text, "lead" or "line"); actions: (label, words to say or "", callback)."""
+        view = self.view
+        key = (title, tuple(lines), tuple((a[0], a[1]) for a in actions), reply, width, view.scale)
+        if key == self._key and not force:
+            return
+        self._key = key
+        lettering.letter(self.title_label, title, view._size(40), INK, weight="bold")
+        for child in self.lines.winfo_children():
+            child.destroy()
+        for text, role in lines:
+            label = tk.Label(self.lines, background=PLATE, borderwidth=0, anchor="w", justify="left")
+            size, color = (view._size(34), INK) if role == "lead" else (view._size(24), SLATE)
+            lettering.letter(label, text, size, color, width=width, max_lines=3)
+            label.pack(fill="x", pady=(0, CELL // 3))
+        for button in self._buttons:
+            button._ring.destroy()
+        self._buttons = []
+        compact = view._compact()
+        column_width = (width - CELL // 2) // 2 - 12
+        for index, (label, say, callback) in enumerate(actions):
+            subtitle = "" if compact else (f"Say \u201cADA, {say}\u201d" if say else "")
+            button = view._card_button(self.actions, label, subtitle, column_width, callback)
+            button._ring.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, CELL // 2), pady=(0, CELL // 2))
+            self._buttons.append(button)
+        if reply:
+            lettering.letter(self.reply_label, reply, view._size(26), INK, width=width, max_lines=3)
+        else:
+            self.reply_label.configure(image="", text="")
+
+
 class AccessibleView(tk.Frame):
-    """The practice screen: state, ADA's words and the latest takes, with native controls."""
+    """The home screen: a rail of rooms (Practice, Piano, Pieces, Camera, Voice & AI), one open at a time."""
 
     def __init__(self, parent, *, submit, talk, stop, tools, status):
         super().__init__(parent, background=PLATE)
@@ -108,27 +159,47 @@ class AccessibleView(tk.Frame):
         self._compact_drawn = False
         self._context = {"piano": "", "piece": ""}
         self._typed = tk.StringVar(self)
+        self.room = "practice"
+        self._rail_status = {key: ("", False) for key, _ in ROOMS}
+        self._room_specs = {}
+        self._view_width = 0
 
-        inner = self._inner = tk.Frame(self, background=PLATE)
-        inner.pack(fill="both", expand=True, padx=CELL * 2, pady=CELL)
-        inner.bind("<Configure>", self._resized)
-
-        top = tk.Frame(inner, background=PLATE)
-        self.mark = tk.Canvas(top, background=PLATE, highlightthickness=0, borderwidth=0, takefocus=False,
+        # The rail: ADA's mark, then one door per room, each with a lamp and its live status.
+        self.rail = tk.Frame(self, background=RAISED)
+        self.rail.pack(side="left", fill="y")
+        mark_row = tk.Frame(self.rail, background=RAISED)
+        mark_row.pack(side="top", fill="x", padx=CELL // 2 + 6, pady=(CELL, CELL // 2))
+        self.mark = tk.Canvas(mark_row, background=RAISED, highlightthickness=0, borderwidth=0, takefocus=False,
                               width=1, height=1)
         self.mark.pack(side="left")
-        self.word = tk.Label(top, text="ADA", background=PLATE, foreground=INK, borderwidth=0)
+        self.word = tk.Label(mark_row, text="ADA", background=RAISED, foreground=INK, borderwidth=0)
         self.word.pack(side="left", padx=(CELL // 2, 0))
-        self.piano_label = tk.Label(top, text="", background=PLATE, foreground=SLATE, borderwidth=0)
-        self.piano_label.pack(side="right")
+        self.rail_buttons = {}
+        for key, label in ROOMS:
+            button = self._card_button(self.rail, label, "", 240, lambda key=key: self.open_room(key), ground=RAISED)
+            button._ring.pack(side="top", fill="x", padx=CELL // 3, pady=(0, CELL // 4))
+            self.rail_buttons[key] = button
+        self.tools_button = self._button(self.rail, "All settings", "F3", tools, ground=RAISED)
+        self.tools_button._ring.pack(side="bottom", anchor="w", padx=CELL // 3, pady=(0, CELL))
 
-        state = tk.Frame(inner, background=PLATE)
+        main = self._main = tk.Frame(self, background=PLATE)
+        main.pack(side="left", fill="both", expand=True, padx=(CELL * 2, CELL * 2), pady=CELL)
+        self.bind("<Configure>", self._view_resized)
+        rooms = self._rooms = tk.Frame(main, background=PLATE)
+        inner = self._inner = tk.Frame(rooms, background=PLATE)
+        inner.pack(fill="both", expand=True)
+        inner.bind("<Configure>", self._resized)
+        self.rooms = {"practice": inner}
+        for key, _ in ROOMS[1:]:
+            self.rooms[key] = Room(self, rooms)
+
+        state = tk.Frame(main, background=PLATE)
         self.lamp = tk.Canvas(state, background=PLATE, highlightthickness=0, borderwidth=0, takefocus=False,
                               width=1, height=1)
         self.lamp.pack(side="left", padx=(0, CELL // 2))
         self.state_label = tk.Label(state, text="", background=PLATE, foreground=INK, borderwidth=0)
         self.state_label.pack(side="left")
-        self.status_label = tk.Label(inner, textvariable=status, anchor="w", justify="left",
+        self.status_label = tk.Label(main, textvariable=status, anchor="w", justify="left",
                                      background=PLATE, foreground=SLATE, borderwidth=0)
 
         bar = tk.Frame(inner, background=PLATE)
@@ -157,8 +228,6 @@ class AccessibleView(tk.Frame):
         self.talk_button._ring.pack(side="left", padx=(0, CELL // 2))
         self.stop_button = self._button(controls, "Stop", "Esc", stop)
         self.stop_button._ring.pack(side="left")
-        self.tools_button = self._button(controls, "Tools", "F3", tools)
-        self.tools_button._ring.pack(side="right")
 
         takes = self._takes_frame = tk.Frame(inner, background=PLATE)
         self.piece_label = tk.Label(takes, text="", anchor="w", background=PLATE, foreground=SLATE, borderwidth=0)
@@ -199,37 +268,114 @@ class AccessibleView(tk.Frame):
         # Packing order is priority: controls, state and ADA's words keep their room first;
         # the takes, packed last, yield space before ADA's words do.
         bar.pack(side="bottom", fill="x", pady=(CELL // 2, 0))
-        top.pack(side="top", fill="x")
-        state.pack(side="top", fill="x", pady=(CELL, CELL // 2))
-        self.status_label.pack(side="top", fill="x", pady=(0, CELL // 2))
         words.pack(side="top", fill="both", expand=True)  # ADA's words take every spare line
         takes.pack(side="bottom", fill="x", pady=(CELL // 2, 0))
+        state.pack(side="top", fill="x", pady=(CELL // 2, CELL // 2))  # what ADA is doing, in every room
+        self.status_label.pack(side="top", fill="x", pady=(0, CELL // 2))
+        rooms.pack(side="top", fill="both", expand=True)
 
         self._status_trace = status.trace_add("write", self._show_status)
         self._render_all()
 
     # Construction helpers
 
-    def _button(self, parent, label, key, command, *, primary=False):
-        ring = tk.Frame(parent, background=PLATE, padx=3, pady=3)  # turns ivory while the button has focus
+    def _button(self, parent, label, key, command, *, primary=False, ground=PLATE):
+        ring = tk.Frame(parent, background=ground, padx=3, pady=3)  # turns ivory while the button has focus
         button = tk.Button(ring, text=label, command=command, takefocus=True, relief="flat", borderwidth=0,
-                           highlightthickness=3, highlightbackground=PLATE, highlightcolor=PLATE,
+                           highlightthickness=3, highlightbackground=ground, highlightcolor=ground,
                            background=INK if primary else RAISED, foreground=PLATE if primary else INK,
                            activebackground="#FFFFFF" if primary else RAISED_HOVER,
                            activeforeground=PLATE if primary else INK, cursor="hand2",
                            padx=CELL // 2, pady=CELL // 4, font=("", 11, "bold"))
         button.pack()
         button.bind("<FocusIn>", lambda event: ring.configure(background=INK), add="+")
-        button.bind("<FocusOut>", lambda event: ring.configure(background=PLATE), add="+")
+        button.bind("<FocusOut>", lambda event: ring.configure(background=ground), add="+")
         button._ring, button._label, button._key, button._primary = ring, label, key, primary
         return button
+
+    def _card_button(self, parent, title, subtitle, width, command, *, ground=PLATE):
+        """A big button whose face is a card: bold title over one line of status or words to say."""
+        ring = tk.Frame(parent, background=ground, padx=3, pady=3)
+        button = tk.Button(ring, text=title, command=command, takefocus=True, relief="flat", borderwidth=0,
+                           highlightthickness=3, highlightbackground=ground, highlightcolor=ground,
+                           background=RAISED if ground == PLATE else ground, activebackground=RAISED_HOVER,
+                           foreground=INK, activeforeground=INK, cursor="hand2", anchor="w", font=("", 11, "bold"))
+        button.pack(fill="x")
+        button.bind("<FocusIn>", lambda event: ring.configure(background=INK), add="+")
+        button.bind("<FocusOut>", lambda event: ring.configure(background=ground), add="+")
+        button._ring, button._ground = ring, ground
+        self._face(button, title, subtitle, width)
+        return button
+
+    def _face(self, button, title, subtitle, width, *, lamp=None, outline=None):
+        if not self._smooth:
+            button.configure(text=f"{title}: {subtitle}" if subtitle else title, image="")
+            return
+        image = lettering.card(button, title, subtitle, width, self._size(30 if lamp else 26),
+                               self._size(21 if lamp else 20), INK, SLATE, lamp=lamp, lamp_color=INK if lamp == "on"
+                               else SLATE, outline=outline, padding=(round(self._size(14)), round(self._size(12))))
+        button.configure(image=image, compound="none", text=title)
+        button._lettering = image
+
+    def _rail_width(self):
+        width = self.winfo_width()
+        return int(min(max((width if width > 50 else 928) * 0.31, 210), 380)) - CELL
+
+    def _render_rail(self):
+        width = self._rail_width()
+        compact = self._compact()
+        for key, label in ROOMS:
+            status, ready = self._rail_status[key]
+            button = self.rail_buttons[key]
+            selected = key == self.room
+            button.configure(background=RAISED_HOVER if selected else RAISED)
+            self._face(button, label, "" if compact else status, width, lamp="on" if ready else "off",
+                       outline=INK if selected else None)
+
+    def _view_resized(self, event):
+        if event.widget is self and abs(event.width - self._view_width) >= CELL // 2:
+            self._view_width = event.width
+            self._render_rail()
+            self._show_room()
+
+    def open_room(self, key):
+        """Show one room; the rail marks it. Practice is home; Escape returns there."""
+        if self._closed or key not in self.rooms:
+            return
+        self.rooms[self.room].pack_forget()
+        self.room = key
+        self.rooms[key].pack(fill="both", expand=True)
+        self._render_rail()
+        self._show_room()
+
+    def set_rail(self, key, status, ready):
+        if self._closed or self._rail_status.get(key) == (status, ready):
+            return
+        self._rail_status[key] = (status, ready)
+        self._render_rail()
+
+    def set_room(self, key, title, lines, actions):
+        """The window describes a room's content; only the open room is drawn."""
+        if self._closed:
+            return
+        self._room_specs[key] = (title, list(lines), list(actions))
+        if key == self.room:
+            self._show_room()
+
+    def _show_room(self, force=False):
+        if self.room == "practice" or self.room not in self._room_specs:
+            return
+        title, lines, actions = self._room_specs[self.room]
+        width = self._text_width()
+        self.rooms[self.room].show(title, lines, actions, self._said_text and f"ADA: {self._said_text}", width,
+                                   force=force)
 
     def _size(self, base):
         return base * self.scale
 
     def _text_width(self):
-        width = self._inner.winfo_width()
-        return (width if width > 50 else 760) - 8
+        width = self._main.winfo_width()
+        return (width if width > 50 else 560) - 8
 
     # Rendering
 
@@ -247,6 +393,8 @@ class AccessibleView(tk.Frame):
         self._show_typed()
         self._show_words(force=True)
         self._draw_takes()
+        self._render_rail()
+        self._show_room(force=True)
 
     def _letter_button(self, button):
         if not self._smooth:
@@ -284,7 +432,7 @@ class AccessibleView(tk.Frame):
             for dot in dots:
                 column, row = (0 if dot <= 3 else 1), (dot - 1) % 3
                 self._flat_dot(canvas, left + column * pitch, radius + 2 + row * pitch, radius, INK,
-                               self._mark_images)
+                               self._mark_images)  # on the raised rail
         canvas.configure(width=int(len(BRAILLE_ADA) * (cell + gap) - gap + 4),
                          height=int(radius * 2 + pitch * 2 + 6))
 
@@ -318,7 +466,7 @@ class AccessibleView(tk.Frame):
             self.status_label.pack_forget()  # the state word already says it, or the room is ADA's
             return
         if not self.status_label.winfo_manager():
-            self.status_label.pack(side="top", fill="x", pady=(0, CELL // 2), before=self._words)
+            self.status_label.pack(side="top", fill="x", pady=(0, CELL // 2), before=self._rooms)
         if self._smooth:
             image = lettering.photo(self.status_label, text, self._size(24), SLATE, width=width, max_lines=2)
             self.status_label.configure(image=image, compound="none")
@@ -332,8 +480,7 @@ class AccessibleView(tk.Frame):
         if self._rendered.get("context") == key:
             return
         self._rendered["context"] = key
-        for label, text, size in ((self.piano_label, self._context["piano"], 22),
-                                  (self.piece_label, self._context["piece"], 24)):
+        for label, text, size in ((self.piece_label, self._context["piece"], 24),):
             if text:
                 lettering.letter(label, text, self._size(size), SLATE, width=width, max_lines=1)
             else:
@@ -556,6 +703,7 @@ class AccessibleView(tk.Frame):
         if speaker == "ADA":
             self._said_text = text
             self._show_words()
+            self._show_room()
         if not self._smooth:
             transcript.see("end")
 

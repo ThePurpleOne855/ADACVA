@@ -153,6 +153,52 @@ def shape(master, kind, width, height, color, line=0, radius=0):
     return _tk_photo(master, shape_png(kind, round(width), round(height), color, round(line, 1), round(radius, 1)))
 
 
+def _shape_image(kind, width, height, color, line=0, radius=0):
+    return Image.open(io.BytesIO(shape_png(kind, round(width), round(height), color, round(line, 1),
+                                           round(radius, 1)))).convert("RGBA")
+
+
+@lru_cache(maxsize=256)
+def card_png(title, subtitle, width, title_size, subtitle_size, title_color, subtitle_color,
+             lamp=None, lamp_color=None, outline=None, padding=(16, 12)):
+    """A fixed-width card: an optional lamp ("on" filled, "off" ring), a bold title and one subtitle line.
+
+    outline draws a rounded frame (the selected state) in that colour. Transparent ground.
+    """
+    pad_x, pad_y = padding
+    title_font, sub_font = face(title_size, "bold"), face(subtitle_size)
+    lamp_size = round(title_size * 0.62) if lamp else 0
+    text_x = pad_x + (lamp_size + round(title_size * 0.42) if lamp else 0)
+    room = max(10, width - text_x - pad_x)
+    title_lines = _clip(wrap(title, title_size, room, "bold"), title_size, room, "bold", 1)
+    sub_lines = _clip(wrap(subtitle, subtitle_size, room), subtitle_size, room, "regular", 1) if subtitle else []
+    t_ascent, t_descent = title_font.getmetrics()
+    s_ascent, s_descent = sub_font.getmetrics()
+    gap = round(subtitle_size * 0.25)
+    height = pad_y * 2 + t_ascent + t_descent + ((gap + s_ascent + s_descent) if sub_lines else 0)
+    image = Image.new("RGBA", (int(width), int(height)))
+    if outline:
+        line = max(3, round(title_size / 10))
+        image.alpha_composite(_shape_image("frame", width, height, outline, line=line, radius=round(title_size * 0.4)))
+    if lamp:
+        top = pad_y + (t_ascent + t_descent - lamp_size) // 2
+        ring = max(2.0, lamp_size / 6)
+        image.alpha_composite(_shape_image("dot" if lamp == "on" else "ring", lamp_size, lamp_size, lamp_color,
+                                           line=ring), (pad_x, top))
+    draw = ImageDraw.Draw(image)
+    draw.text((text_x, pad_y), title_lines[0], font=title_font, fill=title_color)
+    if sub_lines:
+        draw.text((text_x, pad_y + t_ascent + t_descent + gap), sub_lines[0], font=sub_font, fill=subtitle_color)
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def card(master, title, subtitle, width, title_size, subtitle_size, title_color, subtitle_color, **style):
+    return _tk_photo(master, card_png(title, subtitle, int(width), round(title_size), round(subtitle_size),
+                                      title_color, subtitle_color, **style))
+
+
 def letter(widget, text, size, color, *, keep_text=True, fallback_size=None, **style):
     """Show text on a Label or Button as smooth type, keeping the widget's own text."""
     if available():

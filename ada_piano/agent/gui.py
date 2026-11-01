@@ -63,6 +63,10 @@ class CoachPanel(ttk.Frame):
         self._microphone_mode = None
         self._input_notice = None
         self.conversation = False  # accessible mode: auto-send speech and listen again after replies
+        # Wake word: keep listening for "ADA ..." whenever ADA is idle (the accessible window's default).
+        self.wake_default = False
+        self.wake_word = False
+        self._ask_once = False  # F1 or the greeting: one question without the wake word, then back to "ADA"
         self._listen_next = False
         self.local_commands = hasattr(self.score, "load_piece")
         if self.local_commands and getattr(self.score, "announce", None) is None:
@@ -318,12 +322,18 @@ class CoachPanel(ttk.Frame):
                 self.announce("Spoken responses off. Say speech on, or press F1 and ask for speech on.")
                 self.speak.set(False)
         elif name == "listening":
-            self.conversation = arguments["enabled"]
+            enabled = arguments["enabled"]
+            if self.wake_default:
+                self.wake_word, self.conversation = enabled, False
+            else:
+                self.conversation = enabled
             self.hands_free.set(False)
             self.microphone.stop()
             self._microphone_mode = None
             self._listen_pending = self._listen_next = False
-            if self.conversation:
+            if enabled and self.wake_default:
+                self.announce("Listening for ADA. Say ADA, then what you want, at any time.")
+            elif enabled:
                 self.announce("Voice conversation on. You can speak when I finish. During playing, say ADA stop.")
             else:
                 self.announce("Microphone off. Press F1 to speak again, or type a command and press Enter.")
@@ -378,6 +388,7 @@ class CoachPanel(ttk.Frame):
         self._input_notice = None
         self.voice.stop()
         self._listen_pending = True
+        self._ask_once = self.wake_word
         if self._microphone_busy():
             self.conversation = True
         if not self.microphone.available:
@@ -418,6 +429,10 @@ class CoachPanel(ttk.Frame):
         if self._closed:
             return
         busy = self._microphone_busy()
+        if (self.wake_word and not busy and not self.hands_free.get() and not self.conversation
+                and not self._listen_pending and not self.microphone.running and self.microphone.available):
+            self._ask_once = False
+            self.hands_free.set(True)  # idle again: listen for "ADA ..."
         automatic = self.hands_free.get() or self.conversation
         if busy and not automatic:
             if self.microphone.running:
@@ -425,7 +440,7 @@ class CoachPanel(ttk.Frame):
             self.microphone_status.set("Microphone paused while ADA speaks or reference sound plays.")
             return
         mode = ("guarded" if busy else "wake" if self.hands_free.get() else
-                "conversation" if self.conversation else "manual")
+                "conversation" if self.conversation or self._ask_once else "manual")
         if self._microphone_mode is not None and self._microphone_mode != mode:
             # Discard audio captured under the previous mode, including ADA's own speech.
             self.microphone.stop()
@@ -441,7 +456,7 @@ class CoachPanel(ttk.Frame):
             if command is not None and command[0] == "stop":
                 disable = "stop listening" in text.lower()
                 if disable:
-                    self.conversation = False
+                    self.conversation = self.wake_word = False
                 take = getattr(self.score, "take", None)
                 self.stop()
                 if disable:
@@ -453,6 +468,7 @@ class CoachPanel(ttk.Frame):
             if mode == "manual":
                 self.entry.focus_set()
             else:
+                self._ask_once = False
                 self.ask()
                 self._listen_next = self.conversation
             return
