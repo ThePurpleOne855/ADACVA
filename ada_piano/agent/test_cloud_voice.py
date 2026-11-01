@@ -143,9 +143,10 @@ class CloudVoiceTests(unittest.TestCase):
         service, _, _, _, _ = self.service()
         with patch("ada_piano.agent.cloud_voice.playback_command", return_value=["fake-player"]), \
              patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as launch, \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "secret"}):
+             patch.dict(os.environ, {"OPENAI_API_KEY": "secret", "MODEL_API_KEY": "meta-secret"}):
             asyncio.run(service._play(Path("test.wav")))
         self.assertNotIn("OPENAI_API_KEY", launch.call_args.kwargs["env"])
+        self.assertNotIn("MODEL_API_KEY", launch.call_args.kwargs["env"])
         self.assertEqual(launch.call_args.kwargs["env"]["ADA_SPEECH_WAV"], "test.wav")
 
     def test_no_filename_interpolation_in_windows_script(self):

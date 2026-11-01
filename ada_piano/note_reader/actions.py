@@ -20,6 +20,17 @@ def choose(selection, choices):
     raise ValueError("Selection not found. List the choices again and use its number or full name.")
 
 
+def narrow(review, start_measure, end_measure):
+    """Copy of the approved review limited to two measure labels, always cut from the full approved passage."""
+    approved = getattr(review, "approved_passage", review)
+    narrowed = copy(approved)
+    narrowed.approved_passage = approved
+    narrowed.exercise = select_passage(approved, start_measure, end_measure)
+    narrowed.selection = {**approved.selection, "start_measure_label": start_measure,
+                          "end_measure_label": end_measure}
+    return narrowed
+
+
 def numbered(choices):
     return "; ".join(f"{index}: {name}" for index, name in enumerate(choices, 1)) or "none"
 
@@ -97,10 +108,7 @@ class VoiceControls:
                 score.last.set(args["end_measure"])
                 score.preview()
                 return self.read_review()
-            review = copy(score.loaded)
-            review.exercise = select_passage(review, args["start_measure"], args["end_measure"])
-            review.selection = {**review.selection, "start_measure_label": args["start_measure"],
-                                "end_measure_label": args["end_measure"]}
+            review = narrow(score.loaded, args["start_measure"], args["end_measure"])
             w.coach.stop()
             score._invalidate()
             score.review = review
@@ -116,11 +124,8 @@ class VoiceControls:
             piece = pieces.find(review.piece["id"], score.catalog)
             replacement = pieces.load(piece, review.piece["passage"], args["hands"])
             if "start_measure_label" in review.selection:
-                replacement.exercise = select_passage(replacement, review.selection["start_measure_label"],
-                                                      review.selection["end_measure_label"])
-                replacement.selection = {**replacement.selection,
-                    "start_measure_label": review.selection["start_measure_label"],
-                    "end_measure_label": review.selection["end_measure_label"]}
+                replacement = narrow(replacement, review.selection["start_measure_label"],
+                                     review.selection["end_measure_label"])
             w.coach.stop()
             score._invalidate()
             score.review = replacement
@@ -152,6 +157,8 @@ class VoiceControls:
                 return "Automatic session saving is available in the main ADA practice window."
             w.sessions.save(snapshot, announce=True)
             return "Saving your latest session."
+        if name == "text_size":
+            return w.text_size(args["step"])
         if name == "show_tools":
             w.toggle_tools(args["visible"])
             return None

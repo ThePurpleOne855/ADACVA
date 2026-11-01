@@ -11,9 +11,10 @@ from ada_piano import pieces
 from ada_piano.ai_tutor.performance import describe
 from ada_piano.voice import VoiceService, piper_tts
 from . import local_commands
-from .coach import Coach, error_message
+from .coach import Coach, default_model, error_message, is_meta
 from .cloud_voice import CloudVoiceService, VOICES, DEFAULT_VOICE, DEFAULT_SPEED, PREVIEW_TEXT
 from .session import ChatSession
+from .settings import meta_api_key
 from .speech_input import create_speech_input, voice_command
 from .tools import AgentTools, passage_context, select_passage
 
@@ -32,7 +33,7 @@ class CoachPanel(ttk.Frame):
         self._injected_voice = voice is not None
         self.microphone = microphone if microphone is not None else create_speech_input()
         self._api_key = None
-        self._model = os.environ.get("ADA_OPENAI_MODEL", "gpt-4.1-mini")
+        self._model = default_model()
         self._request_context_active = False
         self._speech_done = Event()
         self._speech_done.set()
@@ -142,8 +143,13 @@ class CoachPanel(ttk.Frame):
             self.voice_choice.set(NATURAL_VOICE if piper_tts.available() else "System (local)")
             self._voice_changed()
 
+    def _key_available(self):
+        if is_meta(self._model):
+            return bool(meta_api_key())
+        return bool(self._api_key or os.environ.get("OPENAI_API_KEY"))
+
     def _update_connection(self):
-        configured = bool(self._api_key or os.environ.get("OPENAI_API_KEY"))
+        configured = self._key_available()
         self.connection.set(f"API key: {'set' if configured else 'missing'} · Model: {self._model}")
 
     def api_settings(self):
@@ -162,6 +168,7 @@ class CoachPanel(ttk.Frame):
         ttk.Label(frame, text="Model:").pack(anchor="w")
         model = tk.StringVar(value=self._model)
         ttk.Entry(frame, textvariable=model).pack(fill="x", pady=5)
+        ttk.Label(frame, text="Models starting with muse- (Meta Muse Spark) use your saved Meta API key.").pack(anchor="w")
         ttk.Label(frame, text="Keys are kept in memory for this run. API usage requires API credit.").pack(anchor="w")
 
         def apply():
@@ -207,7 +214,7 @@ class CoachPanel(ttk.Frame):
             self._listen_next = True
 
     def _api_configured(self):
-        return bool(self.client or self._api_key or os.environ.get("OPENAI_API_KEY"))
+        return bool(self.client or self._key_available())
 
     def _local(self, question):
         """Handle offline commands; returns True when handled locally."""
@@ -547,6 +554,7 @@ class CoachPanel(ttk.Frame):
                            self.score.catalog if hasattr(self.score, "catalog") else None, hands=hands)
         coach = Coach(tools, self.client, api_key=self._api_key, model=self._model)
         coach.history = list(self._history)
+        service = "Meta" if is_meta(self._model) else "OpenAI"
 
         def run():
             try:
@@ -554,7 +562,7 @@ class CoachPanel(ttk.Frame):
                 self._queue.put(("answer", token, (request["review"], answer, coach.history)))
             except Exception as exc:
                 # Avoid leaking SDK errors, credentials or remote payloads into UI/logs.
-                self._queue.put(("error", token, error_message(exc)))
+                self._queue.put(("error", token, error_message(exc, service)))
             finally:
                 coach.close()
         self._thread = Thread(target=run, name="ada-coach", daemon=True)

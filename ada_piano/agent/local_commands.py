@@ -16,7 +16,7 @@ HELP = ("Say list pieces, then practice a piece by name. Say play it for me, gui
         "F1 opens the microphone; Escape stops; Tab moves between controls.")
 SETTINGS_HELP = ("Say status, repeat, list MIDI outputs, select MIDI output one, list cameras, "
                  "select camera one, tempo sixty, slower, faster, measures one to four, "
-                 "right hand, left hand, or both hands. Say save session, show tools, hide tools, "
+                 "right hand, left hand, or both hands. Say save session, show tools, hide tools, bigger text, smaller text, "
                  "list voices, use system voice, speech speed one, stop listening, or quit. "
                  "For imports, say list score files, import score one, list score options, "
                  "review passage, next measure, then approve passage after checking the notes.")
@@ -91,6 +91,8 @@ def _controls(plain):
         return "score_select", {"field": match[1], "selection": str(number) if number is not None else selected}
     if plain in {"show tools", "hide tools"}:
         return "show_tools", {"visible": plain == "show tools"}
+    if plain in {"bigger text", "larger text", "smaller text", "normal text", "normal text size"}:
+        return "text_size", {"step": 1 if plain in {"bigger text", "larger text"} else -1 if plain == "smaller text" else 0}
     if plain in {"slower", "slow down", "faster", "speed up"}:
         return "tempo", {"delta": -10 if plain in {"slower", "slow down"} else 10}
     if plain in {"stop listening", "microphone off", "start listening", "microphone on"}:

@@ -13,7 +13,7 @@ from test_agent_gui import FakeVoice
 from test_agent import FakeClient, answer
 from test_hand_analysis import calibration_press, camera_samples, hand
 from test_note_reader import FakeBackend, note
-from test_playback import FakeOutputBackend, message
+from test_playback import FakeOutputBackend, message, wait_until
 
 from ada_piano.agent.test_input import FakeMicrophone
 from ada_piano.note_reader import NoteEvent, NoteReader
@@ -82,6 +82,80 @@ class AccessibleIntegrationTests(unittest.TestCase):
         self.say("tempo 500")
         self.assertEqual(self.window.playback.tempo.get(), "60")
         self.assertIn("20 to 300", self.voice.messages[-1])
+
+    def record_take(self, wrong=None, late=None):
+        """Simulated MIDI (FakeBackend, no hardware): play the loaded passage in time, stop, return the report."""
+        w = self.window
+        self.say("record")
+        started, beat = w.score.take.started_at, 60 / w.score.take_tempo
+        events = []
+        for index, event in enumerate(w.score.loaded.exercise.events):
+            onset = started + .5 + float(event.onset) * beat + (.4 if index == late else 0)
+            for tone in event.tones:
+                pitch = (wrong or {}).get(index, tone.pitch)
+                hold = .9 * float(tone.duration) * beat
+                events += [NoteEvent("on", pitch, 80, 1, onset), NoteEvent("off", pitch, 0, 1, onset + hold, hold)]
+        for event in sorted(events, key=lambda e: (e.timestamp, e.kind == "on")):
+            w._record(event)
+        with patch("ada_piano.score_import.gui.monotonic", return_value=events[-1].timestamp + 1):
+            self.say("stop")
+        return w.score.performance_summary()
+
+    def test_retry_reselects_measures_from_full_approved_passage(self):
+        w = self.window
+
+        def measures():
+            exercise = w.score.loaded.exercise
+            return {item.measure for item in (*exercise.events, *exercise.rests)}
+
+        self.say("select MIDI input one")
+        self.say("practice fur elise")
+        self.say("measures one to two")
+        first = self.record_take()
+        self.assertEqual((first["correct"], first["notes_expected"]), (13, 13))
+        # Moving to a later passage used to fail: the 1-2 copy had replaced the approved piece.
+        self.say("measures three to four")
+        self.assertEqual(self.voice.messages[-1], "Selected measures 3 through 4. Say record or guided practice.")
+        self.assertEqual(measures(), {"3", "4"})
+        retry = self.record_take(wrong={1: 57}, late=3)
+        self.assertEqual((retry["correct"], retry["wrong"], retry["late"], retry["notes_expected"]), (13, 1, 1, 14))
+        self.assertEqual(retry["measure_details"], [{"measure": "3", "notes_expected": 7, "correct": 6,
+            "wrong": [{"expected": "G sharp3", "played": "A3"}], "late": ["E4"]}])
+        self.assertEqual(retry["clean_measures"], ["4"])
+        self.assertIn("13 of 14 notes correct", self.voice.messages[-1])
+        # Widening, and changing hands then re-selecting, still start from the approved piece.
+        self.say("measures one to four")
+        self.assertEqual(measures(), {"1", "2", "3", "4"})
+        self.say("left hand")
+        self.say("measures two to three")
+        self.assertEqual((measures(), w.score.loaded.piece["hands"]), ({"2", "3"}, "left"))
+        # Invalid ranges are spoken and leave the current selection untouched.
+        for words, error in [("measures 1 to 90", "outside the approved passage"),
+                             ("measures four to three", "reversed")]:
+            self.say(words)
+            self.assertIn(error, self.voice.messages[-1])
+            self.assertEqual(measures(), {"2", "3"})
+
+    def test_recorded_takes_are_embossed_and_text_size_follows_voice(self):
+        w = self.window
+        self.say("select MIDI input one")
+        self.say("practice ode to joy")
+        self.run_gui(60)  # the plate picks up the loaded piece on the next tick
+        self.assertEqual(w.home._context["piece"], "Ode to Joy · the whole melody · right hand")
+        self.record_take()
+        self.record_take(wrong={5: 66})  # F sharp 4 for F 4 in measure 2
+        self.assertEqual([take["score"] for take in w.home._takes], ["30 / 30", "29 / 30"])
+        self.assertEqual(w.home._takes[-1]["note"], "Measure 2: F sharp 4 instead of F 4.")
+        ringed = [cell["measure"] for cell in w.home._takes[-1]["cells"] if cell["ring"]]
+        self.assertEqual(ringed, ["2"])
+        self.say("bigger text")
+        self.assertEqual((w.home.scale, self.voice.messages[-1]), (1.15, "Text size 115 percent."))
+        self.say("normal text")
+        self.assertEqual(w.home.scale, 1.0)
+        self.say("measures one to two")
+        self.run_gui(60)
+        self.assertEqual(w.home._context["piece"], "Ode to Joy · measures 1 to 2 · right hand")
+        self.assertEqual(w.home._takes, [])  # a new passage starts a fresh comparison
 
     def test_f1_resumes_direct_voice_actions_after_microphone_off(self):
         self.say("stop listening")
@@ -178,3 +252,81 @@ class AccessibleIntegrationTests(unittest.TestCase):
         self.assertFalse(self.window._closed)
         self.assertIsNotNone(self.window.score.session_snapshot())
         self.assertIn("still open", self.voice.messages[-1])
+
+
+THROUGH = "Midi Through:Midi Through Port-0 14:0"
+SYNTH = "FLUID Synth (4321):Synth input port (4321:0) 128:0"
+PIANO = "Digital Piano:Digital Piano MIDI 1 24:0"  # a USB piano: same ALSA port for input and output
+
+
+@unittest.skipIf(existing.tk is None, "Tk unavailable")
+class PianoAutoSetupTests(unittest.TestCase):
+    """Plug-and-play MIDI setup. Simulated ports only (FakeBackend/FakeOutputBackend), using Linux ALSA names."""
+    run_gui = existing.NoteReaderGuiTests.run_gui
+    close_window = AccessibleIntegrationTests.close_window
+
+    def open(self, inputs, outputs):
+        try:
+            self.root = existing.tk.Tk()
+        except existing.tk.TclError as exc:
+            self.skipTest(str(exc))
+        self.root.withdraw()
+        temp = TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.backend, self.outputs, self.voice = FakeBackend(), FakeOutputBackend(), FakeVoice()
+        self.backend.names, self.outputs.names = list(inputs), list(outputs)
+        with patch("ada_piano.camera.gui.best_camera", return_value=(0, "Camera 0")), \
+                patch("ada_piano.agent.gui.CoachPanel.use_best_voice"):
+            self.window = existing.NoteReaderWindow(self.root, reader=NoteReader(self.backend),
+                player=ReferencePlayer(self.outputs, message_factory=message),
+                camera_worker=existing.FakeCameraWorker(), voice=self.voice, microphone=FakeMicrophone(),
+                accessible=True, session_directory=temp.name)
+        self.addCleanup(self.close_window)
+        return self.window
+
+    def test_opening_with_piano_connects_it_and_sends_reference_to_it(self):
+        w = self.open([THROUGH, PIANO], [THROUGH, SYNTH, PIANO])
+        self.assertEqual(w.reader.port_name, PIANO)
+        self.assertEqual(w.playback.output.get(), PIANO)  # not the first software synth
+        self.assertIn("Piano connected. I'll play reference sound through it too.", self.voice.messages)
+
+    def test_piano_plugged_in_after_opening_is_found_and_paired(self):
+        w = self.open([THROUGH], [THROUGH])
+        self.assertFalse(w.reader.connected)
+        self.assertEqual(w.playback.output.get(), "")
+        self.backend.names, self.outputs.names = [THROUGH, PIANO], [THROUGH, SYNTH, PIANO]
+        w._next_scan = 0
+        self.run_gui(60)
+        self.assertEqual((w.reader.port_name, w.playback.output.get()), (PIANO, PIANO))
+        self.assertEqual(self.voice.messages[-1], "Piano connected. I'll play reference sound through it too.")
+
+    def test_replug_with_new_port_number_still_plays_reference(self):
+        moved = PIANO.replace("24:0", "28:0")
+        w = self.open([PIANO], [PIANO])
+        self.backend.names = self.outputs.names = []
+        w._check_due = 0
+        self.run_gui(60)
+        self.assertFalse(w.reader.connected)
+        self.assertIn("disconnected", self.voice.messages[-1])
+        self.backend.names, self.outputs.names = [moved], [moved]
+        w._next_scan = 0
+        self.run_gui(60)
+        self.assertEqual((w.reader.port_name, w.playback.output.get()), (moved, moved))
+        w.playback.play_note(60)
+        wait_until(lambda: w.playback.player.status.state != "playing")
+        self.assertEqual(w.playback.player.status.state, "finished", w.playback.player.status.detail)
+        self.assertEqual([m.note for m in self.outputs.port.messages if m.type == "note_on"], [60])
+
+    def test_software_ports_are_not_the_piano_and_input_only_device_keeps_output(self):
+        keyboard = "USB Keyboard:USB Keyboard MIDI 1 20:0"  # sends notes but has no output port
+        w = self.open([THROUGH, "RtMidiOut Client:RtMidi output 130:0", keyboard], [THROUGH, SYNTH])
+        self.assertEqual(w.reader.port_name, keyboard)
+        self.assertEqual(w.playback.output.get(), SYNTH)
+        self.assertIn("Piano connected.", self.voice.messages)
+        self.assertNotIn("Piano connected. I'll play reference sound through it too.", self.voice.messages)
+
+    def test_device_name_matches_input_and_output_ports(self):
+        device = existing.NoteReaderWindow._device
+        self.assertEqual(device(PIANO), "digital piano")
+        self.assertEqual(device("mioXC:mioXC MIDI 1 36:0"), "mioxc")
+        self.assertEqual(device("Digital Piano 0"), device("Digital Piano 1"))  # Windows-style names (simulated)

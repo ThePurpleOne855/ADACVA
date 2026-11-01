@@ -225,3 +225,17 @@ class SavedKeyTests(unittest.TestCase):
             self.assertEqual(os.environ["OPENAI_API_KEY"], "sk-env")
         with patch.dict("os.environ", {}, clear=True):
             self.assertFalse(load_api_key(path.with_name("missing")))
+
+    def test_saved_meta_key_is_read_at_startup_but_kept_out_of_environment(self):
+        import os
+        from ada_piano.agent import settings
+        config = Path(tempfile.mkdtemp())
+        (config / "ada-piano").mkdir()
+        (config / "ada-piano" / "meta_api_key").write_text("meta-test\n")
+        self.addCleanup(setattr, settings, "_meta_key", settings._meta_key)
+        with patch.dict("os.environ", {"XDG_CONFIG_HOME": str(config), "APPDATA": str(config)}, clear=True):
+            self.assertFalse(settings.load_api_key())  # no OpenAI key is saved there
+            self.assertEqual(settings.meta_api_key(), "meta-test")
+            self.assertNotIn("MODEL_API_KEY", os.environ)  # helper processes cannot inherit it
+            os.environ["MODEL_API_KEY"] = "meta-env"
+            self.assertEqual(settings.meta_api_key(), "meta-env")  # Meta's documented variable wins

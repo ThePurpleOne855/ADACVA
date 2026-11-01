@@ -4,8 +4,18 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .env
+.env.*
+# API keys belong in ~/.config/ada-piano/, never in the repository.
+meta_api_key
+openai_api_key
+*.key
 models/
 dist/
 build/
 scores/
 work/
+# Design tooling scratch (screenshots, decision pages); briefs, PRODUCT.md and DESIGN.md are committed
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/questions/
+.impeccable/config.local.json

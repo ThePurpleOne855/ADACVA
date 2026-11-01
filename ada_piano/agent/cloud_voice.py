@@ -213,6 +213,7 @@ class CloudVoiceService:
             raise RuntimeError("No audio player")
         environment = dict(os.environ)
         environment.pop("OPENAI_API_KEY", None)
+        environment.pop("MODEL_API_KEY", None)
         environment["ADA_SPEECH_WAV"] = str(path)
         options = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
         process = None

@@ -110,6 +110,90 @@ class AccessibleViewTests(unittest.TestCase):
         self.submit.assert_not_called()
         self.assertEqual(self.root.tk.call("after", "info"), "")
 
+    def test_a_take_arriving_mid_animation_leaves_no_orphan_timer(self):
+        cells = [{"measure": "1", "dots": ["ok", "ok"], "ring": False}, {"measure": "2", "dots": ["miss"], "ring": True}]
+        self.view.show_take(cells, 2, 3, key="ode", note="Measure 2: F sharp 4 instead of F 4.")
+        self.view.show_take(cells, 3, 3, key="ode", note="Every note right.")  # first animation still running
+        self.assertEqual([take["score"] for take in self.view._takes], ["2 / 3", "3 / 3"])
+        self.view.close()
+        self.assertEqual(self.root.tk.call("after", "info"), "")
+
+    def test_takes_compare_only_within_the_same_passage(self):
+        cells = [{"measure": "1", "dots": ["ok"], "ring": False}]
+        self.view.show_take(cells, 1, 1, key="measures 1-2")
+        self.view.show_take(cells, 0, 1, key="measures 3-4")
+        self.assertEqual([take["key"] for take in self.view._takes], ["measures 3-4"])
+        self.view.set_context(piece="Ode to Joy · measures 3 to 4 · right hand")
+        self.assertEqual(self.view._takes, [])  # a new piece or passage starts a fresh comparison
+
+    def test_text_size_steps_and_resets(self):
+        self.assertEqual([self.view.change_scale(step) for step in (1, 1, 0, -1, -1, -1)],
+                         [1.15, 1.3, 1.0, 0.9, 0.8, 0.8])
+
+    def test_without_pillow_the_view_still_works_with_tk_text(self):
+        from unittest.mock import patch
+        with patch("ada_piano.note_reader.lettering.available", return_value=False):
+            view = AccessibleView(self.root, submit=self.submit, talk=self.talk, stop=self.stop,
+                                  tools=self.tools, status=self.status)
+        self.addCleanup(view.close)
+        self.assertEqual(view.talk_button.cget("text"), "Talk to ADA (F1)")
+        self.assertEqual(str(view.talk_button.cget("image")), "")
+        view.append("ADA", "Plain text still reads.")
+        self.assertIn("ADA: Plain text still reads.", view.transcript.get("1.0", "end"))
+
+
+@unittest.skipIf(tk is None, "Tkinter is not installed")
+class TakeEvidenceTests(unittest.TestCase):
+    """Pure evidence shaping: the real scorer on synthetic notes, no Tk window."""
+
+    def report(self, changes, hold=0.9):
+        from ada_piano import pieces
+        from ada_piano.ai_tutor.performance import PlayThrough, compare
+        exercise = pieces.load(pieces.find("ode to joy", pieces.catalog()), "whole", None).exercise
+        take = PlayThrough(100.0)
+        for index, event in enumerate(exercise.events):
+            onset = 100.5 + float(event.onset) * 0.75
+            for tone in event.tones:
+                pitch = changes.get(index, tone.pitch)
+                if pitch is not None:
+                    take.observe("on", pitch, 80, 0, onset)
+                    take.observe("off", pitch, 0, 0, onset + hold * float(tone.duration) * 0.75)
+        take.finish(140)
+        return exercise, compare(exercise, take.notes, target_bpm=80)
+
+    def test_one_dot_per_note_grouped_by_measure_with_the_trouble_ringed(self):
+        from ada_piano.note_reader.accessible import take_cells, take_note
+        exercise, report = self.report({5: 66})  # F sharp 4 for F 4, the second note of measure 2
+        cells = take_cells(exercise, report)
+        self.assertEqual([len(cell["dots"]) for cell in cells], [4, 4, 4, 3, 4, 4, 4, 3])
+        self.assertEqual(cells[1], {"measure": "2", "dots": ["ok", "miss", "ok", "ok"], "ring": True})
+        self.assertEqual(sum(dot == "miss" for cell in cells for dot in cell["dots"]), 1)
+        self.assertEqual([cell["ring"] for cell in cells].count(True), 1)
+        self.assertEqual(take_note(report), "Measure 2: F sharp 4 instead of F 4.")
+
+    def test_clean_and_unfinished_takes_say_so(self):
+        from ada_piano.note_reader.accessible import take_cells, take_note
+        exercise, report = self.report({})
+        self.assertEqual(take_note(report), "Every note right.")
+        self.assertTrue(all(dot == "ok" for cell in take_cells(exercise, report) for dot in cell["dots"]))
+        exercise, report = self.report({}, hold=0.3)  # every key released far too soon
+        self.assertEqual(report["measures_needing_work"][0], "1")  # the scorer's ranking, not ours
+        self.assertEqual(take_note(report), "Measure 1: E 4 was held too briefly.")
+        exercise, report = self.report({index: None for index in range(20, 30)})  # stopped early
+        cells = take_cells(exercise, report)
+        self.assertEqual(cells[-1]["dots"], ["rest", "rest", "rest"])
+        self.assertFalse(report["complete"])
+
+    def test_state_words(self):
+        from ada_piano.note_reader.accessible import state_word
+        self.assertEqual(state_word("Recording. Pause four seconds for results; say ADA stop to finish."),
+                         ("Recording", True))
+        self.assertEqual(state_word("Listening for one question; pause when finished."), ("Listening", True))
+        self.assertEqual(state_word("ADA is thinking. Say ADA stop or press Escape to cancel."), ("Thinking", True))
+        self.assertEqual(state_word("Microphone off."), ("Microphone off", False))
+        self.assertEqual(state_word("Microphone paused while ADA speaks or reference sound plays."), ("Paused", False))
+        self.assertEqual(state_word(""), ("Ready", False))
+
 
 if __name__ == "__main__":
     unittest.main()

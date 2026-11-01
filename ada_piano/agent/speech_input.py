@@ -125,6 +125,7 @@ class SpeechInput:
             environment = dict(os.environ)
             # The microphone helper never needs API credentials.
             environment.pop("OPENAI_API_KEY", None)
+            environment.pop("MODEL_API_KEY", None)
             environment["ADA_MIC_CONTINUOUS"] = "1" if continuous else "0"
             options = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
             with self._lock:

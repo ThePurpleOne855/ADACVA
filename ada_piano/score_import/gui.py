@@ -208,7 +208,7 @@ class ScorePanel(ttk.Frame):
         text = (f"Loaded {piece.title}, {piece.passages[passage][2]}, {hand_text}. "
                 "Say \"play it for me\" to hear it first, or \"record\" when you're ready. "
                 "Pause for four seconds when you finish.")
-        self.status.set("Ready. " + text)
+        self.status.set("Ready.")  # the instructions are already in the feedback line above
         self._say(text)
         return {"status": "loaded", "piece": piece.id, "title": piece.title, "passage": passage,
                 "hands": review.piece["hands"], "default_tempo": piece.default_tempo}
@@ -404,10 +404,11 @@ class ScorePanel(ttk.Frame):
         try:
             path = self._outputs[self.output.get()]
             self._parts = score_parts(path)
-            self.part_selector["values"] = tuple(f"{p['id']} — {p['name']}" for p in self._parts)
+            labels = tuple(f"{p['id']} — {p['name']}" for p in self._parts)
+            self.part_selector["values"] = labels
             preferred = next((i for i, part in enumerate(self._parts)
                               if "piano" in part["name"].casefold()), 0)
-            self.part.set(self.part_selector["values"][preferred])
+            self.part.set(labels[preferred])  # some Tk builds hand "values" back as one string
             self.select_part()
             self.preview_button.configure(state="normal")
             self.whole_button.configure(state="normal")

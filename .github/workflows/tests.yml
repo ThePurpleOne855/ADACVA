@@ -25,6 +25,8 @@ jobs:
         python: ['3.11', '3.12']
     env:
       PYTHONUTF8: '1'
+      # Runner system Pythons can lack tkinter (Ubuntu's 3.12); uv-managed builds include it.
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - uses: actions/checkout@v6
         with:
