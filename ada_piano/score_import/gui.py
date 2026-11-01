@@ -208,7 +208,7 @@ class ScorePanel(ttk.Frame):
         text = (f"Loaded {piece.title}, {piece.passages[passage][2]}, {hand_text}. "
                 "Say \"play it for me\" to hear it first, or \"record\" when you're ready. "
                 "Pause for four seconds when you finish.")
-        self.status.set("Ready. " + text)
+        self.status.set("Ready.")  # the instructions are already in the feedback line above
         self._say(text)
         return {"status": "loaded", "piece": piece.id, "title": piece.title, "passage": passage,
                 "hands": review.piece["hands"], "default_tempo": piece.default_tempo}

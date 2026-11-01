@@ -1,0 +1,367 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-01T07:14:53+00:00",
+  "title": "Design System: ADA Piano Teacher",
+  "extensions": {
+    "colorMeta": {
+      "plate": {
+        "role": "neutral",
+        "displayName": "Matte Plate",
+        "canonical": "#15181F",
+        "tonalRamp": [
+          "#1B1D22",
+          "#31353F",
+          "#495164",
+          "#606D8B",
+          "#818CA7",
+          "#A7AEBE",
+          "#CCCFD7",
+          "#EEEFF1"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised Field",
+        "canonical": "#1E222C",
+        "tonalRamp": [
+          "#1B1D22",
+          "#31353F",
+          "#495164",
+          "#606C8A",
+          "#828CA6",
+          "#A8AEBD",
+          "#CCCFD6",
+          "#EEEFF1"
+        ]
+      },
+      "raised-hover": {
+        "role": "neutral",
+        "displayName": "Raised Hover",
+        "canonical": "#2A3040",
+        "tonalRamp": [
+          "#1B1D22",
+          "#303540",
+          "#485065",
+          "#5E6B8C",
+          "#808BA8",
+          "#A6ADBF",
+          "#CBCED7",
+          "#EEEFF1"
+        ]
+      },
+      "edge": {
+        "role": "neutral",
+        "displayName": "Edge",
+        "canonical": "#3A4152",
+        "tonalRamp": [
+          "#1C1D21",
+          "#32353E",
+          "#4B5263",
+          "#626D88",
+          "#838DA4",
+          "#A9AEBC",
+          "#CCCFD6",
+          "#EEEFF1"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ivory Ink",
+        "canonical": "#F2EFE6",
+        "tonalRamp": [
+          "#242119",
+          "#443E2C",
+          "#6D6241",
+          "#998752",
+          "#B2A375",
+          "#C5BCA0",
+          "#DAD6C8",
+          "#F2F1ED"
+        ],
+        "contrastOnPlate": "15.3:1"
+      },
+      "slate": {
+        "role": "neutral",
+        "displayName": "Slate",
+        "canonical": "#B9BFCD",
+        "tonalRamp": [
+          "#1C1D21",
+          "#32363E",
+          "#4B5262",
+          "#636E88",
+          "#848DA4",
+          "#A9AFBC",
+          "#CCCFD6",
+          "#EEEFF1"
+        ],
+        "contrastOnPlate": "9.4:1"
+      },
+      "amber": {
+        "role": "primary",
+        "displayName": "Signal Amber",
+        "canonical": "#FFB020",
+        "tonalRamp": [
+          "#2F230E",
+          "#5D4313",
+          "#9D6B11",
+          "#E59606",
+          "#F5B033",
+          "#EDC378",
+          "#EDD9B5",
+          "#F7F2E8"
+        ],
+        "contrastOnPlate": "9.6:1"
+      },
+      "faded": {
+        "role": "neutral",
+        "displayName": "Faded",
+        "canonical": "#8A90A0",
+        "tonalRamp": [
+          "#1D1E20",
+          "#34363C",
+          "#4F535E",
+          "#6A7081",
+          "#8A8F9E",
+          "#ACB0B9",
+          "#CED0D4",
+          "#EFEFF0"
+        ],
+        "contrastOnPlate": "5.6:1"
+      },
+      "quiet": {
+        "role": "neutral",
+        "displayName": "Quiet",
+        "canonical": "#868CA0",
+        "tonalRamp": [
+          "#1D1E20",
+          "#34363C",
+          "#4F525F",
+          "#696E82",
+          "#898E9F",
+          "#ACAFB9",
+          "#CECFD4",
+          "#EFEFF1"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "State word only; amber when live."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Current take score."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Word ADA beside the braille mark; tools heading."
+      },
+      "reading": {
+        "displayName": "Reading",
+        "purpose": "ADA's latest words; steps 34 to 24 px to fit before any ellipsis."
+      },
+      "input": {
+        "displayName": "Input",
+        "purpose": "Typed text in the message box."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "Button labels, paired with the Key role on one baseline."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Instruction sentence, piece line, measured note."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Piano status, take row labels, empty-takes prompt."
+      },
+      "key": {
+        "displayName": "Key",
+        "purpose": "Shortcut hint on each button (F1, Esc, F3)."
+      }
+    },
+    "textScale": {
+      "steps": [
+        0.8,
+        0.9,
+        1.0,
+        1.15,
+        1.3,
+        1.5,
+        1.75
+      ],
+      "default": 1.0,
+      "controls": "Ctrl +/-, Ctrl 0, or voice",
+      "appliesTo": "every plate size; tools tab labels and main heading"
+    },
+    "focus": [
+      {
+        "name": "focus-ring",
+        "value": "3px ivory ring outside a 3px plate-coloured gap",
+        "purpose": "Every plate button; visible on the ivory primary too."
+      },
+      {
+        "name": "field-focus",
+        "value": "3px border edge -> ivory",
+        "purpose": "Message box and tools entries."
+      }
+    ],
+    "shadows": [],
+    "motion": [
+      {
+        "name": "take-press",
+        "value": "70ms per measure, stepwise",
+        "purpose": "A new take presses in measure by measure; a new take mid-animation restarts it."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact",
+        "value": "window height < 760px",
+        "purpose": "Hide dot rows; one measured line under ADA's words."
+      },
+      {
+        "name": "home-min",
+        "value": "700x540"
+      },
+      {
+        "name": "home-default",
+        "value": "900x700"
+      },
+      {
+        "name": "tools-min",
+        "value": "1100x760"
+      },
+      {
+        "name": "tools-default",
+        "value": "1400x850"
+      }
+    ],
+    "fonts": {
+      "bundled": "ada_piano/assets/fonts/AtkinsonHyperlegible-{Regular,Bold}.ttf",
+      "licence": "SIL OFL (ada_piano/assets/fonts/OFL.txt)",
+      "renderer": "Pillow raster shown as Tk images; widgets keep real text",
+      "outsideWorld": "Tools widgets other than tab labels and main heading use Tk's bitmap face (no Xft on this Tk build)."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Talk to ADA (F1): ivory fill, key on the button, ivory focus ring with a plate gap.",
+      "html": "<span class=\"ds-ring\"><button class=\"ds-btn-primary\">Talk to ADA <span class=\"ds-key\">F1</span></button></span>",
+      "css": ".ds-ring{display:inline-block;padding:3px;background:#15181F;} .ds-ring:focus-within{background:#F2EFE6;} .ds-btn-primary{font-family:'Atkinson Hyperlegible',sans-serif;font-weight:700;font-size:26px;background:#F2EFE6;color:#15181F;border:3px solid #15181F;border-radius:0;padding:15px 26px;cursor:pointer;outline:none;} .ds-btn-primary:hover{background:#FFFFFF;} .ds-btn-primary .ds-key{font-weight:400;font-size:20px;color:#4A4F5C;margin-left:14px;}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Stop (Esc) and Tools (F3): raised fill, slate key hint.",
+      "html": "<span class=\"ds-ring2\"><button class=\"ds-btn-secondary\">Stop <span class=\"ds-key2\">Esc</span></button></span>",
+      "css": ".ds-ring2{display:inline-block;padding:3px;background:#15181F;} .ds-ring2:focus-within{background:#F2EFE6;} .ds-btn-secondary{font-family:'Atkinson Hyperlegible',sans-serif;font-weight:700;font-size:26px;background:#1E222C;color:#F2EFE6;border:3px solid #15181F;border-radius:0;padding:15px 26px;cursor:pointer;outline:none;} .ds-btn-secondary:hover{background:#2A3040;} .ds-key2{font-weight:400;font-size:20px;color:#B9BFCD;margin-left:14px;}"
+    },
+    {
+      "name": "Message Box",
+      "kind": "input",
+      "refersTo": "message-box",
+      "description": "Raised square field, edge border turning ivory on focus.",
+      "html": "<input class=\"ds-message\" placeholder=\"Type to ADA, or press F1 and speak\">",
+      "css": ".ds-message{font-family:'Atkinson Hyperlegible',sans-serif;font-size:28px;width:100%;height:66px;box-sizing:border-box;background:#1E222C;color:#F2EFE6;border:3px solid #3A4152;border-radius:0;padding:0 12px;outline:none;} .ds-message::placeholder{color:#B9BFCD;font-size:26px;} .ds-message:focus{border-color:#F2EFE6;}"
+    },
+    {
+      "name": "State Line",
+      "kind": "custom",
+      "refersTo": "",
+      "description": "Flat lamp plus state word; amber disc when live, hollow slate ring when idle.",
+      "html": "<div class=\"ds-state\"><span class=\"ds-lamp\"></span>Listening</div><div class=\"ds-state ds-idle\"><span class=\"ds-lamp\"></span>Ready</div>",
+      "css": ".ds-state{font-family:'Atkinson Hyperlegible',sans-serif;font-weight:700;font-size:50px;color:#FFB020;background:#15181F;display:flex;align-items:center;gap:12px;padding:12px 0;} .ds-lamp{width:22px;height:22px;border-radius:50%;background:#FFB020;box-sizing:border-box;} .ds-idle{color:#F2EFE6;} .ds-idle .ds-lamp{background:transparent;border:3px solid #B9BFCD;}"
+    },
+    {
+      "name": "Embossed Takes",
+      "kind": "custom",
+      "refersTo": "take-dot",
+      "description": "One flat dot per note grouped by measure; last take faded at 74 percent above, measure to fix ringed amber.",
+      "html": "<div class=\"ds-takes\"><div class=\"ds-row\"><span class=\"ds-lbl\">Last take</span><span class=\"ds-m ds-prev\"><i></i><i class=\"x\"></i><i></i><i></i></span><span class=\"ds-m ds-prev\"><i></i><i></i><i class=\"r\"></i></span><b class=\"ds-s ds-sp\">27 / 30</b></div><div class=\"ds-row\"><span class=\"ds-lbl\">This take</span><span class=\"ds-m ds-ringed\"><i></i><i class=\"x\"></i><i></i><i></i></span><span class=\"ds-m\"><i></i><i></i><i></i></span><b class=\"ds-s\">29 / 30</b></div></div>",
+      "css": ".ds-takes{font-family:'Atkinson Hyperlegible',sans-serif;background:#15181F;padding:12px 0;} .ds-row{display:flex;align-items:center;gap:20px;margin-bottom:6px;} .ds-lbl{font-size:22px;color:#B9BFCD;width:110px;} .ds-m{display:inline-flex;gap:12px;padding:10px;border:4px solid transparent;border-radius:14px;} .ds-m i{width:28px;height:28px;border-radius:50%;background:#F2EFE6;box-sizing:border-box;} .ds-m i.x{background:transparent;border:4px solid #F2EFE6;} .ds-m i.r{transform:scale(.3);background:#8A90A0;} .ds-prev i{width:21px;height:21px;background:#8A90A0;} .ds-prev i.x{border-color:#8A90A0;border-width:3px;background:transparent;} .ds-ringed{border-color:#FFB020;} .ds-s{margin-left:auto;font-weight:700;font-size:40px;color:#F2EFE6;} .ds-sp{font-size:26px;color:#B9BFCD;}"
+    },
+    {
+      "name": "Braille Mark",
+      "kind": "custom",
+      "refersTo": "",
+      "description": "ADA in Grade 1 braille beside bold tracked capitals.",
+      "html": "<div class=\"ds-mark\"><svg width=\"110\" height=\"46\" viewBox=\"0 0 110 46\"><g fill=\"#F2EFE6\"><circle cx=\"8\" cy=\"8\" r=\"6.5\"/><circle cx=\"50\" cy=\"8\" r=\"6.5\"/><circle cx=\"69\" cy=\"8\" r=\"6.5\"/><circle cx=\"69\" cy=\"28\" r=\"6.5\"/><circle cx=\"102\" cy=\"8\" r=\"6.5\"/></g></svg><span>ADA</span></div>",
+      "css": ".ds-mark{display:flex;align-items:flex-start;gap:12px;background:#15181F;} .ds-mark span{font-family:'Atkinson Hyperlegible',sans-serif;font-weight:700;font-size:30px;letter-spacing:6px;color:#F2EFE6;}"
+    },
+    {
+      "name": "Tools Tab",
+      "kind": "nav",
+      "refersTo": "tools-tab",
+      "description": "Tools workspace tabs; raised when unselected, plate when selected.",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab\">Piano &amp; Camera</button><button class=\"ds-tab ds-on\">ADA Coach</button></div>",
+      "css": ".ds-tabs{display:flex;gap:2px;background:#15181F;padding:10px 12px 0;} .ds-tab{font-family:'Atkinson Hyperlegible',sans-serif;font-weight:700;font-size:20px;background:#1E222C;color:#F2EFE6;border:none;padding:9px 18px;cursor:pointer;outline:none;} .ds-tab:hover{background:#2A3040;} .ds-tab:focus-visible{box-shadow:inset 0 0 0 3px #F2EFE6;} .ds-on{background:#15181F;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Tactile Sign Plate",
+    "overview": "The home screen is one matte plate seen from the piano bench: raised ivory letters, a braille mark, and each take embossed beneath as a row of dots. Hierarchy comes from size alone; there is no header bar, no bubbles, no chrome.\n\nEmbossed is a metaphor carried by form, not rendering: the plate is flat, dots are flat discs with smooth edges, nothing is bevelled or shadowed. One amber signal owns live state; every space descends from one 24 px cell and every size follows the learner's text scale.\n\nThe tools workspace is the same instrument opened up: same palette, focus language and spacing, with denser native widgets.",
+    "keyCharacteristics": [
+      "One flat matte plate, ivory ink, one amber live signal that always travels with a word.",
+      "Atkinson Hyperlegible drawn smooth from the bundled face.",
+      "Size-only hierarchy, scaled live from 0.8 to 1.75.",
+      "Takes as flat dots per note grouped by measure; the measure to fix ringed amber.",
+      "One 24 px cell sets every space.",
+      "Every button names its key; focus is an always-visible ivory ring."
+    ],
+    "rules": [
+      {
+        "name": "The One Signal Rule",
+        "body": "Amber means live now: only the six live states and the ringed measure, always beside a word.",
+        "section": "colors"
+      },
+      {
+        "name": "The Seven-to-One Rule",
+        "body": "Anything the learner must read is ivory or slate on the plate; faded is only the previous take.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fill-Before-Clip Rule",
+        "body": "ADA's words take the largest size from 34 to 24 px that fits whole; only then an ellipsis.",
+        "section": "typography"
+      },
+      {
+        "name": "The Size-Is-Rank Rule",
+        "body": "Rank is size and weight, not colour, boxes or rules.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Cell Rule",
+        "body": "Every space is the 24 px cell or a simple fraction of it.",
+        "section": "layout"
+      },
+      {
+        "name": "The No-Faked-Relief Rule",
+        "body": "No shadows, bevels or gradients; depth is a tonal step only.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do derive every space from the 24 px cell.",
+      "Do pair amber with a word, and use it only for the six live states and the ringed measure.",
+      "Do scale every size with the learner's text scale.",
+      "Do show each button's key on the button.",
+      "Do keep an ivory focus ring with a plate-coloured gap on every focusable control.",
+      "Do draw readable text from the bundled Atkinson Hyperlegible, keeping the widget's real text."
+    ],
+    "donts": [
+      "Don't add shadows, bevels, gradients or faked relief; embossing is expressed by flat dots.",
+      "Don't carry meaning by colour alone: missed is a ring, live is a word.",
+      "Don't add history, bubbles, header bars or scrollbars to the plate.",
+      "Don't shrink take dots below the floor; wrap whole measures instead.",
+      "Don't ellipsize ADA's words above 24 px.",
+      "Don't use faded for anything the learner must read first."
+    ]
+  }
+}

@@ -15,8 +15,11 @@ from ada_piano.score_import.gui import ScorePanel
 from ada_piano.agent.gui import CoachPanel
 from ada_piano.camera.analysis import HandAnalysis
 from ada_piano.sessions import SessionStore
-from ada_piano.note_reader.accessible import AccessibleView
+from ada_piano import pieces
+from ada_piano.note_reader import lettering
+from ada_piano.note_reader.accessible import INK, AccessibleView, take_cells, take_note
 from ada_piano.note_reader.actions import VoiceControls
+from ada_piano.note_reader.theme import style_tools
 
 
 class NoteReaderWindow:
@@ -41,6 +44,7 @@ class NoteReaderWindow:
         self.root.geometry("1400x850")
         self.root.minsize(1100, 760)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        style_tools(root)
         self.port = tk.StringVar()
         self.status = tk.StringVar(value="Disconnected. Select a MIDI input or try Demo.")
         self.latest = tk.StringVar(value="Play a note")
@@ -57,7 +61,8 @@ class NoteReaderWindow:
         self.camera = CameraPanel(panes, worker=camera_worker, on_frame=self.hands.add_frame,
                                   on_reset=self._camera_reset)
         panes.add(self.camera, weight=2)
-        ttk.Label(frame, text="Note Reader", font=("", 24, "bold")).pack(anchor="w")
+        self._heading = ttk.Label(frame, text="Note Reader", font=("", 24, "bold"))
+        self._heading.pack(anchor="w")
         ttk.Label(frame, text="Yamaha YPT-300 · MIDI input test · Middle C = C4 (60)").pack(anchor="w", pady=(0, 12))
         ttk.Label(frame, text="MIDI input (the USB cable's name may appear instead of Yamaha):").pack(anchor="w")
         self.selector = ttk.Combobox(frame, textvariable=self.port, state="readonly")
@@ -118,6 +123,9 @@ class NoteReaderWindow:
                                        tools=self.toggle_tools, status=self.home_status)
             self.home.pack(fill="both", expand=True)
             self.coach.on_message = self.home.append
+            for key, step in (("<Control-plus>", 1), ("<Control-equal>", 1), ("<Control-KP_Add>", 1),
+                              ("<Control-minus>", -1), ("<Control-KP_Subtract>", -1), ("<Control-0>", 0)):
+                root.bind(key, lambda event, step=step: self.text_size(step) or "break")
             self.root.geometry("900x700")
             self.root.minsize(700, 540)
             self.coach.use_best_voice()
@@ -136,6 +144,7 @@ class NoteReaderWindow:
             piano = "The piano is connected." if self.reader.connected else (
                 "The piano is not connected yet. Plug in the USB MIDI cable; I'll keep checking.")
             self.greet(piano)
+        self._letter_tools()
         self._next_scan = monotonic() + 3
         self._timer = root.after(20, self._tick)
 
@@ -198,6 +207,47 @@ class NoteReaderWindow:
     def _save_completed(self, snapshot):
         if self.sessions is not None:
             self.sessions.save(snapshot)
+        exercise = self.score.take_exercise
+        if self.home is not None and snapshot.get("mode") == "play_through" and exercise is not None:
+            report = snapshot["report"]
+            self.home.show_take(take_cells(exercise, report), report["correct"], report["notes_expected"],
+                                key=(snapshot["score_sha256"], repr(snapshot["selection"])), note=take_note(report))
+
+    def text_size(self, step):
+        """Bigger (+1), smaller (-1) or normal (0) text on the practice screen; returns the spoken reply."""
+        if self.home is None:
+            return "Text size applies to the practice screen."
+        scale = self.home.change_scale(step)
+        self._letter_tools()
+        reply = f"Text size {round(scale * 100)} percent."
+        self._announce(reply)
+        return reply
+
+    def _letter_tools(self):
+        """Tab labels and the main heading in the plate's smooth type, at the chosen text size."""
+        if not lettering.available():
+            return
+        scale = self.home.scale if self.home is not None else 1.0
+        self._tool_images = []
+        for child in self.workspace.tabs():
+            image = lettering.photo(self.workspace, self.workspace.tab(child, "text"), 20 * scale, INK, weight="bold")
+            self.workspace.tab(child, image=image, compound="image")
+            self._tool_images.append(image)
+        lettering.letter(self._heading, "Note Reader", 30 * scale, INK, weight="bold")
+
+    def _piece_line(self):
+        loaded = self.score.loaded
+        if loaded is None:
+            return ""
+        piece = getattr(loaded, "piece", None)
+        found = pieces.find(piece["id"], self.score.catalog) if piece else None
+        if found is None:
+            return loaded.exercise.title.split(" — ")[0]
+        hands = "both hands" if piece["hands"] == "both" else f"{piece['hands']} hand"
+        selection = loaded.selection
+        passage = (f"measures {selection['start_measure_label']} to {selection['end_measure_label']}"
+                   if "start_measure_label" in selection else found.passages[piece["passage"]][2])
+        return f"{found.title} · {passage} · {hands}"
 
     def _saved_sessions(self):
         if self.sessions is not None:
@@ -222,6 +272,8 @@ class NoteReaderWindow:
         else:
             status = self.coach.microphone_status.get()
         self.home_status.set(status[:180])
+        self.home.set_context(piano="Piano connected" if self.reader.connected and not self.demo
+                              else "Piano not connected", piece=self._piece_line())
 
     def camera_voice(self, on=True):
         """Start/stop the camera by voice; progress is announced from _tick."""
@@ -308,7 +360,26 @@ class NoteReaderWindow:
 
     @staticmethod
     def _instrument_ports(ports):
-        return [port for port in ports if "midi through" not in port.lower()]
+        # Software ports are never the piano; an RtMidi port can be ADA's own reference output.
+        return [port for port in ports if "midi through" not in port.lower() and "rtmidi" not in port.lower()]
+
+    @staticmethod
+    def _device(port):
+        """Name shared by one device's input and output ports.
+
+        'mioXC:mioXC MIDI 1 36:0' (Linux ALSA client) -> 'mioxc'; 'Digital Piano 1' (Windows index) -> 'digital piano'.
+        """
+        return re.sub(r"\s+\d+$", "", port.split(":")[0]).casefold()
+
+    def _pair_output(self):
+        """Play reference sound through the device ADA listens to; returns the extra words to announce."""
+        self.playback.refresh()
+        device = self._device(self.reader.port_name)
+        match = next((port for port in self.playback.selector["values"] if self._device(port) == device), None)
+        if match is None:
+            return ""
+        self.playback.output.set(match)
+        return " I'll play reference sound through it too."
 
     def _error(self, exc, was_connected=None):
         # NoteReader disconnects itself before raising, so callers pass the earlier state.
@@ -352,7 +423,7 @@ class NoteReaderWindow:
             self.latest.set("Play a note")
             self.details.set("MIDI —   Velocity —   Channel —")
             self.status.set(f"Listening: {self.reader.port_name}")
-            self._announce("Piano connected.")
+            self._announce("Piano connected." + self._pair_output())
             self._check_due = monotonic() + 2
             self._show_state()
         except Exception as exc:

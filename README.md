@@ -49,9 +49,25 @@ For the full desktop window, use a graphical desktop with Tkinter:
 uv run --locked --all-extras python -m ada_piano note-reader
 ```
 
-The first run downloads Python dependencies. Connect **piano MIDI OUT → interface MIDI IN → computer USB** to read your playing. For audible reference through the piano, also connect **interface MIDI OUT → piano MIDI IN** and select the MIDI output in the app. Say or type “practice Ode to Joy,” then “record”; play and pause for about four seconds to hear the report. The desktop **Demo** button shows simulated MIDI activity but is not graded as a learner performance.
+The first run downloads Python dependencies. Connect **piano MIDI OUT → interface MIDI IN → computer USB** to read your playing. For audible reference through the piano, also connect **interface MIDI OUT → piano MIDI IN**. When ADA opens, or when you plug the piano in later, it connects to the piano and plays reference sound back through the same MIDI device. This happens only when exactly one hardware MIDI input is present; otherwise say “list MIDI inputs.” Say or type “practice Ode to Joy,” then “record”; play and pause for about four seconds to hear the report. The desktop **Demo** button shows simulated MIDI activity but is not graded as a learner performance.
 
 An OpenAI API key is optional. Enter it in **API settings** under Tools (F3), or set `OPENAI_API_KEY` in the app's environment. Cloud coaching, speech, and transcription can incur API charges when used. For natural offline speech, run `uv run --locked --all-extras ada-piano voice-setup` once. Say “use natural offline voice” or “use system voice” to select local speech. F1 starts/retries conversation; Escape stops practice, sound, and calibration.
+
+To coach with **Meta Muse Spark** instead, create a key at [dev.meta.ai/api-keys](https://dev.meta.ai/api-keys/) (public preview, U.S. developers) and save it once. The key is typed hidden and is never shown or committed:
+
+```sh
+uv run --locked --all-extras python -c "import getpass, os; from ada_piano.agent.settings import key_file; p = key_file('meta_api_key'); p.parent.mkdir(parents=True, exist_ok=True); fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.write(fd, getpass.getpass('Meta API key: ').strip().encode()); os.close(fd); print('Saved to', p)"
+```
+
+With a saved key (or `MODEL_API_KEY` set), coaching uses `muse-spark-1.3` through Meta's OpenAI-compatible endpoint, at $1.25 per million input tokens and $4.25 per million output tokens. Set `ADA_META_MODEL` to choose another Muse model, or type a model in **API settings**: names starting with `muse-` use Meta, others use OpenAI. Muse Spark returns text only, so speech still uses the OpenAI key or an offline voice.
+
+Run the tests (simulated MIDI, camera, voice, and API; no hardware or key needed):
+
+```sh
+uv run --locked --all-extras python -m unittest discover -s tests
+```
+
+The GUI tests skip when Tkinter cannot load, so check the summary for `skipped=` before trusting a pass.
 
 ## Project limitations
 
@@ -85,7 +101,7 @@ Hand analysis covers at most 1,200 MIDI attacks and retains at most 24 detailed 
 
 Microphone recognition is implemented on Linux and Windows, not macOS. Linux requires PipeWire `pw-record` or ALSA `arecord`, plus local faster-whisper or an API key for cloud transcription. Windows requires an installed English System.Speech recognizer. Offline voices and recognition models need initial downloads. Speech commands do not provide acoustic echo cancellation, and “ADA stop” depends on recognition latency; Escape provides an immediate keyboard stop. Say “stop listening” to disable the microphone.
 
-With an API key configured, Linux microphone clips may be sent for transcription before the wake prefix is checked, including background speech that does not trigger a reply. Cloud speech sends reply text, and coaching sends approved score context and measured summaries. Cancelled requests may already have incurred charges. AI advice is not independent evidence of what the learner played; core practice and local commands work without AI after local dependencies and models are installed.
+With an API key configured, Linux microphone clips may be sent for transcription before the wake prefix is checked, including background speech that does not trigger a reply. Cloud speech sends reply text, and coaching sends approved score context and measured summaries to OpenAI or, with a Meta key, to Meta. Cancelled requests may already have incurred charges. AI advice is not independent evidence of what the learner played; core practice and local commands work without AI after local dependencies and models are installed.
 
 Sessions save as local JSON, but there is no session browser or automatic resume after reopening. “Replay” uses the latest play-through still in memory. Default export locations are:
 
