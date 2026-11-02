@@ -57,16 +57,99 @@ class AccessibleFlowTests(unittest.TestCase):
         self.assertIn("29 of 30 notes correct", coach.voice.messages[-1])
         self.assertIn("measure 2", coach.voice.messages[-1])
 
-    def test_silence_ends_take_and_reference_is_not_recorded(self):
+    def test_beginner_pause_does_not_end_take_and_f6_finishes(self):
         coach = self.panel()
         self.say(coach, "practice fur elise theme right hand")
         self.assertEqual(self.window.score.loaded.selection["staff"], "1")
         self.window.score.play_through()
         self.play([76, 75])
-        with patch("ada_piano.score_import.gui.monotonic", return_value=10 ** 6):
+        take = self.window.score.take
+        with patch("ada_piano.score_import.gui.monotonic", return_value=take.last_activity + 12):
             self.run_gui(200)
+        self.assertIs(self.window.score.take, take)
+        self.window.results()  # F6 callback, also usable when the cloud coach is configured
         self.assertIsNone(self.window.score.take)
         self.assertFalse(self.window.score.performance_summary()["complete"])
+        self.assertIn("stopped early", coach.voice.messages[-1])
+        self.assertNotIn("next passage", coach.voice.messages[-1])
+
+    def test_configured_silence_timeout_and_validation(self):
+        coach = self.panel()
+        self.say(coach, "practice ode to joy")
+        self.say(coach, "auto finish after thirty seconds")
+        self.say(coach, "record")
+        self.play([64, 64])
+        take = self.window.score.take
+        self.say(coach, "disable auto finish")
+        self.assertIn("Finish recording before", coach.voice.messages[-1])
+        with patch("ada_piano.score_import.gui.monotonic", return_value=take.last_activity + 29):
+            self.run_gui(200)
+        self.assertIsNotNone(self.window.score.take)
+        with patch("ada_piano.score_import.gui.monotonic", return_value=take.last_activity + 31):
+            self.run_gui(200)
+        report = self.window.score.performance_summary()
+        self.assertEqual((report["outcome"], report["end_reason"]), ("stopped_early", "inactivity"))
+        self.assertIn("Silence timeout", coach.voice.messages[-1])
+        self.say(coach, "disable auto finish")
+        self.assertEqual(self.window.score.silence_seconds.get(), "0")
+        self.say(coach, "auto finish after 301 seconds")
+        self.assertIn("0 to 300", coach.voice.messages[-1])
+        for value in ["-1", "301", "nan", "inf", "invalid"]:
+            with self.subTest(value=value):
+                self.window.score.silence_seconds.set(value)
+                self.assertFalse(self.window.score.play_through())
+                self.assertIsNone(self.window.score.take)
+
+    def test_disconnect_preserves_partial_take_and_reconnect_does_not_restart_it(self):
+        coach = self.panel()
+        self.say(coach, "practice ode to joy")
+        self.say(coach, "record")
+        self.play([64, 64])
+        self.window.accessible = True
+        self.backend.names = []
+        self.window._check_due = 0
+        self.run_gui(60)
+        report = self.window.score.performance_summary()
+        self.assertIsNone(self.window.score.take)
+        self.assertEqual(report["outcome"], "disconnected")
+        self.assertEqual(report["notes_played"], 2)
+        self.assertEqual(self.window.score.session_snapshot()["report"], report)
+        self.backend.names = ["USB MIDI"]
+        self.window._next_scan = 0
+        self.run_gui(60)
+        self.assertTrue(self.reader.connected)
+        self.assertIsNone(self.window.score.take)
+
+    def test_time_and_note_limits_are_reported_and_empty_takes_replace_old_results(self):
+        coach = self.panel()
+        self.say(coach, "practice ode to joy")
+        self.say(coach, "record")
+        self.play([64])
+        with patch("ada_piano.score_import.gui.monotonic", return_value=self.window.score.take.started_at + 301):
+            self.run_gui(200)
+        self.assertEqual(self.window.score.performance_summary()["outcome"], "recording_limit_reached")
+        self.assertIn("Recording limit reached", coach.voice.messages[-1])
+        self.say(coach, "record")
+        with patch("ada_piano.score_import.gui.MAX_PLAYED", 2):
+            self.play([64, 64, 65])
+        report = self.window.score.performance_summary()
+        self.assertEqual((report["notes_played"], report["outcome"]), (2, "recording_limit_reached"))
+        self.say(coach, "record")
+        self.say(coach, "finish recording")
+        self.assertEqual(self.window.score.performance_summary()["notes_played"], 0)
+        self.assertIn("No passage notes reached", coach.voice.messages[-1])
+
+    def test_finish_button_and_escape_both_keep_partial_feedback(self):
+        coach = self.panel()
+        self.say(coach, "practice ode to joy")
+        for finish in (lambda: self.window.score.finish_button.invoke(), self.window.stop_all):
+            self.say(coach, "record")
+            self.play([64, 64])
+            finish()
+            self.assertIsNone(self.window.score.take)
+            self.assertEqual(self.window.score.performance_summary()["outcome"], "stopped_early")
+            self.assertIn("stopped early", coach.voice.messages[-1])
+            self.assertIn("stopped early", self.window.score.feedback.get())
 
     def test_unknown_piece_and_unsupported_hand_are_spoken(self):
         coach = self.panel()
@@ -93,8 +176,7 @@ class AccessibleFlowTests(unittest.TestCase):
         # Coach-started takes carry measure labels but still count for this passage,
         # and scoring them is spoken without being cancelled as "local activity".
         self.play([76, 75, 76, 75, 76, 71, 74, 72, 69])
-        with patch("ada_piano.score_import.gui.monotonic", return_value=10 ** 6):
-            self.run_gui(200)
+        self.say(coach, "finish recording")
         self.assertIsNotNone(self.window.score.performance_summary())
         self.assertIn("notes correct", coach.voice.messages[-1])
         self.assertNotIn("cancelled", coach.status.get())
@@ -133,6 +215,7 @@ class CommandTests(unittest.TestCase):
     def test_commands_versus_questions(self):
         catalog = pieces.catalog()
         cases = {"stop": "stop", "help": "help", "record": "record", "I'm ready": "record",
+                 "finish recording": "finish", "ADA finish recording": "finish", "finish take": "finish",
                  "how did I do": "results", "play it for me": "reference", "list pieces": "list",
                  "Can I practice Für Elise?": "load", "Where should I start?": None,
                  "Is Für Elise hard?": None, "I love Ode to Joy": None,

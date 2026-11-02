@@ -1,7 +1,7 @@
 import unittest
 
 from ada_piano import pieces
-from ada_piano.ai_tutor.performance import PlayedNote, PlayThrough, compare, expected_notes
+from ada_piano.ai_tutor.performance import PlayedNote, PlayThrough, compare, describe, expected_notes
 
 
 def perform(exercise, bpm=80, start=10.0, *, legato=0.9, change=None):
@@ -30,6 +30,9 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(report["tempo"]["estimated_bpm"], 80)
         self.assertEqual(report["measure_details"], [])
         self.assertEqual(len(report["clean_measures"]), 8)
+        self.assertEqual((report["outcome"], report["completion_percent"], report["notes_not_reached"]),
+                         ("completed", 100, 0))
+        self.assertIn("next passage", describe(report))
 
     def test_wrong_missed_and_extra_do_not_shift_later_notes(self):
         def change(i, note, item):
@@ -56,6 +59,38 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(report["stopped_in_measure"], "4")
         self.assertEqual(report["missed"], 0)
         self.assertEqual(report["pitch_accuracy_percent"], 100)
+        self.assertEqual(report["outcome"], "stopped_early")
+        self.assertGreater(report["notes_not_reached"], 0)
+        self.assertLess(report["completion_percent"], 100)
+        spoken = describe(report)
+        self.assertIn("stopped early", spoken)
+        self.assertIn(f"{report['notes_reached']} of {report['notes_expected']} passage notes", spoken)
+        self.assertIn("portion reached", spoken)
+        self.assertNotIn("Clean play-through", spoken)
+        self.assertNotIn("next passage", spoken)
+        self.assertNotIn("faster", spoken)
+
+    def test_interruption_never_suggests_advancing_even_if_all_notes_reached(self):
+        for reason, message in [("disconnected", "Piano disconnected"),
+                                ("recording_limit_reached", "Recording limit reached")]:
+            with self.subTest(reason=reason):
+                report = compare(self.ode, perform(self.ode), end_reason=reason)
+                self.assertTrue(report["complete"])
+                self.assertEqual(report["outcome"], reason)
+                self.assertIn(message, describe(report))
+                self.assertNotIn("next passage", describe(report))
+
+    def test_empty_recording_has_an_outcome_and_no_success_message(self):
+        for reason in ["finished", "inactivity", "disconnected", "recording_limit_reached"]:
+            with self.subTest(reason=reason):
+                report = compare(self.ode, [], end_reason=reason)
+                self.assertFalse(report["complete"])
+                self.assertEqual(report["completion_percent"], 0)
+                self.assertEqual(report["notes_not_reached"], report["notes_expected"])
+                self.assertIn("No passage notes reached", describe(report))
+                self.assertNotIn("next passage", describe(report))
+        with self.assertRaises(ValueError):
+            compare(self.ode, [], end_reason="unknown")
 
     def test_steady_slow_tempo_is_not_late(self):
         report = compare(self.ode, perform(self.ode, bpm=50), target_bpm=80)

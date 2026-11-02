@@ -236,7 +236,7 @@ class CoachPanel(ttk.Frame):
         if name == "stop":
             take = getattr(self.score, "take", None)
             self.stop()
-            if take is None or not take.notes:  # otherwise stop() just announced the take's results
+            if take is None:  # otherwise stop() just announced the take's outcome
                 self.announce("Stopped.")
         elif name == "help":
             self.announce(local_commands.HELP)
@@ -255,7 +255,17 @@ class CoachPanel(ttk.Frame):
         elif name == "record":
             self.voice.stop()
             self.score.play_through()
-        elif name == "results":
+        elif name == "auto_finish":
+            seconds = arguments["seconds"]
+            if getattr(self.score, "take", None) is not None:
+                self.announce("Finish recording before changing auto-finish.")
+            elif not 0 <= seconds <= 300:
+                self.announce("Choose auto-finish silence from 0 to 300 seconds; 0 turns it off.")
+            else:
+                self.score.silence_seconds.set(str(seconds))
+                self.announce(f"Auto-finish after {seconds} seconds of silence." if seconds else
+                              "Auto-finish off. Say finish recording or press F6 when done.")
+        elif name in {"results", "finish"}:
             if getattr(self.score, "take", None) is not None:
                 self.score.finish_take()
             else:
@@ -451,7 +461,9 @@ class CoachPanel(ttk.Frame):
                 if command is None:
                     continue
                 name, question = command
-                if mode == "guarded" and name != "stop":
+                finish = (self.local_commands and getattr(self.score, "take", None) is not None
+                          and local_commands.parse(question, self.score.catalog) == ("finish", {}))
+                if mode == "guarded" and name != "stop" and not finish:
                     continue
             if command is not None and command[0] == "stop":
                 disable = "stop listening" in text.lower()
@@ -461,7 +473,7 @@ class CoachPanel(ttk.Frame):
                 self.stop()
                 if disable:
                     self.announce("Stopped. Microphone off. Press F1 to speak again.")
-                elif take is None or not take.notes:
+                elif take is None:
                     self.announce("Stopped.")
                 return
             self.text.set(command[1] if command is not None else text)
@@ -489,7 +501,7 @@ class CoachPanel(ttk.Frame):
             if automatic and self._input_notice != "unavailable":
                 self._input_notice = "unavailable"
                 self.announce(self.microphone.status + " Press F1 to retry, or type and press Enter.")
-        self.microphone_status.set(("Listening for ADA stop while sound or practice is active. "
+        self.microphone_status.set(("Listening for ADA stop or ADA finish recording while practice is active. "
                                     if mode == "guarded" and self.microphone.available else "") + self.microphone.status)
 
     def _append(self, speaker, text):

@@ -349,7 +349,7 @@ class NoteReaderWindow:
         if self.home is None:
             return
         if self.score.take is not None:
-            status = "Recording. Pause four seconds for results; say ADA stop to finish."
+            status = "Recording. Say ADA finish recording or press F6 for results; Escape stops."
         elif self.score.tutor is not None:
             status = "Guided practice. Follow the spoken notes; say ADA stop to finish."
         elif not self.coach._speech_done.is_set():
@@ -406,6 +406,9 @@ class NoteReaderWindow:
         self.score.play_through()
 
     def results(self):
+        if self.score.take is not None:
+            self.score.finish_take()
+            return
         if self.tools_visible:
             self.workspace.select(self.coach)
         self.coach.text.set("How did I do?")
@@ -419,7 +422,7 @@ class NoteReaderWindow:
         self.playback.stop()
         if self.hands.calibrating:
             self._announce(self.hands.cancel_calibration())
-        if take is None or not take.notes:  # otherwise the take's results were just announced
+        if take is None:  # otherwise the take's outcome was just announced
             self._announce("Stopped.")
 
     def _show_state(self):
@@ -475,7 +478,7 @@ class NoteReaderWindow:
         # NoteReader disconnects itself before raising, so callers pass the earlier state.
         if was_connected is None:
             was_connected = self.reader.connected
-        self.score.stop_practice()
+        self.score.stop_practice("disconnected")
         self.demo = False
         try:
             self.reader.disconnect()
@@ -521,7 +524,7 @@ class NoteReaderWindow:
 
     def disconnect(self):
         self._user_disconnected = True  # no accessible auto-reconnect until Connect is used again
-        self.score.stop_practice()
+        self.score.stop_practice("disconnected")
         self.demo = False
         self.playback.stop()
         try:

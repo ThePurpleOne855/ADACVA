@@ -49,7 +49,7 @@ For the full desktop window, use a graphical desktop with Tkinter:
 uv run --locked --all-extras python -m ada_piano note-reader
 ```
 
-The first run downloads Python dependencies. Connect **piano MIDI OUT → interface MIDI IN → computer USB** to read your playing. For audible reference through the piano, also connect **interface MIDI OUT → piano MIDI IN**. When ADA opens, or when you plug the piano in later, it connects to the piano and plays reference sound back through the same MIDI device. This happens only when exactly one hardware MIDI input is present; otherwise say “list MIDI inputs.” Say or type “practice Ode to Joy,” then “record”; play and pause for about four seconds to hear the report. The desktop **Demo** button shows simulated MIDI activity but is not graded as a learner performance.
+The first run downloads Python dependencies. Connect **piano MIDI OUT → interface MIDI IN → computer USB** to read your playing. For audible reference through the piano, also connect **interface MIDI OUT → piano MIDI IN**. When ADA opens, or when you plug the piano in later, it connects to the piano and plays reference sound back through the same MIDI device. This happens only when exactly one hardware MIDI input is present; otherwise say “list MIDI inputs.” Say or type “practice Ode to Joy,” then “record”; play, then say “ADA finish recording” or press F6 to hear the report. Pausing does not end a take by default. The desktop **Demo** button shows simulated MIDI activity but is not graded as a learner performance. Use the [hardware demo checklist](docs/demo-validation.md) to validate the complete flow three consecutive times.
 
 An OpenAI API key is optional. Enter it in **API settings** under Tools (F3), or set `OPENAI_API_KEY` in the app's environment. Cloud coaching, speech, and transcription can incur API charges when used. For natural offline speech, run `uv run --locked --all-extras ada-piano voice-setup` once. Say “use natural offline voice” or “use system voice” to select local speech. F1 starts/retries conversation; Escape stops practice, sound, and calibration.
 
@@ -67,7 +67,14 @@ Run the tests (simulated MIDI, camera, voice, and API; no hardware or key needed
 uv run --locked --all-extras python -m unittest discover -s tests
 ```
 
-The GUI tests skip when Tkinter cannot load, so check the summary for `skipped=` before trusting a pass.
+The ordinary test command can skip GUI tests when Tk or a display is unavailable. CI also runs a dedicated Linux desktop job under Xvfb that fails on any skipped test or an empty suite. To use the same strict runner on a local desktop:
+
+```sh
+uv run --locked python -m scripts.desktop_tests discover -s tests -v
+uv run --locked python -m scripts.desktop_tests ada_piano.agent.test_input -v
+```
+
+Run agent input tests separately from the main suite to keep Tk and worker threads isolated. CI runs the reliability, controls, cloud voice, and Linux speech suites in separate processes too.
 
 ## Project limitations
 
@@ -87,7 +94,9 @@ References use a single fixed tempo and do not interpret score tempo changes, pe
 
 Guided practice checks note/chord attacks, not written rhythm. Play-through timing is measured against the learner's fitted tempo. MIDI captures key presses and releases, not piano audio; key-held duration is not audible duration under sustain. ADA does not grade pedal, dynamics, articulation, fingering, or posture.
 
-Play-through comparison accepts at most 600 expected notes. A take retains at most 1,200 played notes; additional note attacks are not recorded. Detailed problem reports cover at most 16 measures and five examples per category per measure. A take ends after about four seconds without MIDI activity once all keys are released, so a long pause can end it before the piece is finished. Use short passages for practice.
+Play-through comparison accepts at most 600 expected notes. Recording stops at 1,200 played notes or five minutes, including time spent waiting to start, and announces “Recording limit reached.” Detailed problem reports cover at most 16 measures and five examples per category per measure. Finish explicitly with “ADA finish recording,” F6, or the **Finish recording** button under Tools. Escape stops and scores the take too.
+
+Silence stopping is off by default. To enable it for the next take, say “auto finish after thirty seconds” or set **Auto-finish silence** in the score tools to 1–300 seconds. Say “disable auto finish” or set it to 0 to turn it off. Held keys do not count as silence. This preference lasts for the current app run. Reports and saved sessions distinguish **completed**, **stopped early**, **disconnected**, and **recording limit reached**. Pitch accuracy applies to the portion reached; completion states how many passage notes were reached. Reaching the end is inferred from MIDI alignment, not proof of correct rhythm or full written note/rest durations.
 
 ### Camera setup and observations
 

@@ -165,6 +165,19 @@ class AccessibleIntegrationTests(unittest.TestCase):
         self.window.coach._poll_microphone()
         self.assertEqual(self.window.score.loaded.piece["id"], "ode_to_joy")
 
+    def test_wake_prefixed_finish_is_accepted_while_recording(self):
+        self.say("practice ode to joy")
+        self.say("record")
+        self.window._record(NoteEvent("on", 64, 80, 1, monotonic()))
+        self.window.coach.hands_free.set(True)
+        self.window.coach._poll_microphone()  # switches into guarded capture
+        self.microphone.events = ["finish recording", "ADA record", "ADA finish recording"]
+        self.window.coach._poll_microphone()
+        self.assertIsNone(self.window.score.take)
+        self.assertEqual(self.window.score.performance_summary()["outcome"], "stopped_early")
+        self.assertIn("stopped early", self.voice.messages[-1])
+        self.assertTrue(self.window.reader.connected)
+
     def test_calibrated_take_flows_to_report_ai_and_saved_file(self):
         w = self.window
         self.say("practice ode to joy")
