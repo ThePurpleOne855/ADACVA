@@ -115,7 +115,7 @@ class CoachPanel(ttk.Frame):
                                           values=("0.75", "0.85", "0.95", "1.00", "1.10", "1.15"),
                                           state="readonly", width=5)
         self.speed_selector.pack(side="left")
-        ttk.Label(speech_controls, text="× (cloud voices)").pack(side="left", padx=4)
+        ttk.Label(speech_controls, text="× (cloud and natural offline voices)").pack(side="left", padx=4)
         ttk.Button(speech_controls, text="Preview voice", command=self.preview_voice).pack(side="left", padx=5)
         self.voice_status = tk.StringVar(value="OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
         ttk.Label(bottom, textvariable=self.voice_status, wraplength=750).pack(anchor="w")
@@ -205,6 +205,8 @@ class CoachPanel(ttk.Frame):
         if isinstance(self.voice, CloudVoiceService):
             self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get(),
                                  speed=float(self.voice_speed.get()))
+        elif isinstance(self.voice, piper_tts.PiperVoiceService):
+            self.voice.configure(speed=float(self.voice_speed.get()))
         self._speech_done = self.voice.say(text)
         return self._speech_done
 
@@ -322,7 +324,8 @@ class CoachPanel(ttk.Frame):
                 self.announce("Choose a speaking speed from 0.75 to 1.15.")
                 return
             self.voice_speed.set(f"{speed:.2f}")
-            self.announce(f"Cloud speaking speed set to {speed:g}. Local voices use their own speaking speed.")
+            fixed = " The system voice keeps its own speed." if self.voice_choice.get() == "System (local)" else ""
+            self.announce(f"Speaking speed set to {speed:g}.{fixed}")
         elif name == "speech":
             enabled = arguments["enabled"]
             if enabled:
@@ -386,7 +389,7 @@ class CoachPanel(ttk.Frame):
             self.voice_status.set(self.voice.status)
         elif choice == "System (local)":
             self.voice = VoiceService()
-            self.voice_status.set("Local system voice selected.")
+            self.voice_status.set("Local system voice selected. Speech stays on this computer; speaking speed does not apply.")
         else:
             self.voice = CloudVoiceService()
             self.voice_status.set("OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")

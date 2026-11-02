@@ -340,6 +340,20 @@ class StandaloneGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.voice._speed, .85)
         self.assertNotIn("private-session-key", self.panel.transcript.get("1.0", "end"))
 
+    def test_offline_voice_receives_selected_speed(self):
+        from ada_piano.voice import piper_tts
+        self.panel.voice = piper_tts.PiperVoiceService("model.onnx", player=lambda path: ["true"],
+                                                       loader=lambda path: NS(config=NS(length_scale=1.0)))
+        self.addCleanup(self.panel.voice.close)
+        self.panel.voice_choice.set("Natural (offline)")
+        self.panel._voice_control("speech_speed", {"value": .85})
+        self.assertIn("Speaking speed set to 0.85.", self.panel.transcript.get("1.0", "end"))
+        done = Event()
+        done.set()
+        with patch.object(self.panel.voice, "say", return_value=done):
+            self.panel._say("Hello")
+        self.assertEqual(self.panel.voice._speed, .85)
+
     def test_spoken_speed_keeps_the_cloud_service_bounds(self):
         self.panel.voice_speed.set("0.85")
         for speed in (0.5, 1.2, float("inf"), float("nan")):
