@@ -1,4 +1,5 @@
 """Offline diagnostics, microphone lifecycle and standalone chat regressions."""
+import gc
 import io
 import os
 from threading import Event
@@ -149,6 +150,9 @@ class StandaloneGuiTests(unittest.TestCase):
     def close(self):
         self.panel.close()
         self.root.destroy()
+        self.panel = None
+        # Reclaim widget cycles on Tk's owning thread, not a later worker.
+        gc.collect()
 
     def settle(self):
         self.panel._thread.join(1)
@@ -339,6 +343,36 @@ class StandaloneGuiTests(unittest.TestCase):
         self.assertEqual(self.panel.voice._voice, "cedar")
         self.assertEqual(self.panel.voice._speed, .85)
         self.assertNotIn("private-session-key", self.panel.transcript.get("1.0", "end"))
+
+    def test_offline_voice_receives_selected_speed(self):
+        from ada_piano.voice import piper_tts
+        self.panel.voice = piper_tts.PiperVoiceService("model.onnx", player=lambda path: ["true"],
+                                                       loader=lambda path: NS(config=NS(length_scale=1.0)))
+        self.addCleanup(self.panel.voice.close)
+        self.panel.voice_choice.set("Natural (offline)")
+        self.panel._voice_control("speech_speed", {"value": .85})
+        self.assertIn("Speaking speed set to 0.85.", self.panel.transcript.get("1.0", "end"))
+        done = Event()
+        done.set()
+        with patch.object(self.panel.voice, "say", return_value=done):
+            self.panel._say("Hello")
+        self.assertEqual(self.panel.voice._speed, .85)
+
+    def test_speech_slows_while_a_piece_is_being_learned(self):
+        for chosen, loaded, expected in (("1.00", None, 1.0), ("1.00", NS(), .85), ("0.75", NS(), .75)):
+            self.panel.voice_speed.set(chosen)
+            self.panel.score.loaded = loaded
+            self.assertAlmostEqual(self.panel._speed("Your turn."), expected)
+        self.panel.score.loaded = None
+
+    def test_notes_to_play_are_spoken_slowest(self):
+        self.panel.voice_speed.set("1.00")
+        for text in ("Correct. Play D sharp5.", "You played C4. Try higher. Play E4.", "Here's the notes: E5 D#5."):
+            self.assertAlmostEqual(self.panel._speed(text), .7, msg=text)
+        for text in ("Say finish recording or press F6 when done.", "F1 opens the microphone.", "Measure 3 needs work."):
+            self.assertAlmostEqual(self.panel._speed(text), 1.0, msg=text)
+        self.panel.voice_speed.set("0.75")
+        self.assertAlmostEqual(self.panel._speed("Play E5."), .65)
 
     def test_spoken_speed_keeps_the_cloud_service_bounds(self):
         self.panel.voice_speed.set("0.85")

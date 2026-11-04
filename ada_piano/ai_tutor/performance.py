@@ -17,6 +17,7 @@ CHORD_GAP = 0.06  # seconds; overlapping attacks closer than this are ordered by
 # Alignment is O(expected x played) in pure Python on the GUI thread; keep it well under a second.
 MAX_EXPECTED = 600
 MAX_PLAYED = 1200
+MAX_TAKE_SECONDS = 300
 MAX_ITEMS = 5  # per measure and category, keeping the model context small
 MAX_MEASURES = 16
 LIMITATIONS = ("Pitch, onset timing relative to your own fitted tempo, hesitations and key-held "
@@ -180,7 +181,9 @@ def _fit(points):
     return solve(trimmed) or fit
 
 
-def compare(exercise: Exercise, played, *, target_bpm=None):
+def compare(exercise: Exercise, played, *, target_bpm=None, end_reason="finished"):
+    if end_reason not in {"finished", "inactivity", "disconnected", "recording_limit_reached"}:
+        raise ValueError("Unknown recording end reason.")
     expected = expected_notes(exercise)
     played = _ordered([n for n in played if 0 <= n.pitch <= 127 and isfinite(n.onset)])
     pairs, reached = align(expected, played)
@@ -260,13 +263,18 @@ def compare(exercise: Exercise, played, *, target_bpm=None):
             item["hesitations"] = box["hesitations"]
         detail.append(item)
     reached_count = reached
+    complete = reached_count == len(expected) and bool(expected)
+    outcome = (end_reason if end_reason in {"disconnected", "recording_limit_reached"}
+               else "completed" if complete else "stopped_early")
     return {
         "kind": "play_through",
         "notes_expected": len(expected), "notes_reached": reached_count,
         "notes_played": len(played), "correct": correct,
         "pitch_accuracy_percent": round(100 * correct / reached_count) if reached_count else 0,
         **totals, "hesitations": sum(b["hesitations"] for b in measures.values()),
-        "complete": reached_count == len(expected) and bool(expected),
+        "complete": complete, "outcome": outcome, "end_reason": end_reason,
+        "completion_percent": round(100 * reached_count / len(expected)) if expected else 0,
+        "notes_not_reached": len(expected) - reached_count,
         "stopped_in_measure": expected[reached - 1].measure if reached else None,
         "tempo": tempo,
         "measures_needing_work": [item["measure"] for item in detail[:3]],
@@ -280,13 +288,20 @@ def compare(exercise: Exercise, played, *, target_bpm=None):
 def describe(report):
     """Short spoken summary of a play-through report; usable without any cloud model."""
     reached = report["notes_reached"]
+    outcome = report.get("outcome", "completed" if report["complete"] else "stopped_early")
+    ending = {"completed": "Passage completed. ", "stopped_early": "Recording stopped early. ",
+              "disconnected": "Piano disconnected. Recording stopped. ",
+              "recording_limit_reached": "Recording limit reached. Recording stopped. "}[outcome]
+    if report.get("end_reason") == "inactivity":
+        ending = "Silence timeout reached. " + ending
     if not report["notes_played"] or not reached:
-        return "I didn't hear any notes from the piano. Check the MIDI connection and try again."
-    parts = [f"{report['correct']} of {reached} notes correct"]
+        return ending + "No passage notes reached. I didn't hear any matching passage notes. Check the MIDI connection and try again."
+    parts = [f"{report['correct']} of {reached} notes correct in the portion reached"]
     if report["complete"]:
-        parts[0] = "You reached the end. " + parts[0]
+        parts[0] = ending + "You reached the end. " + parts[0]
     else:
-        parts[0] = f"You stopped in measure {report['stopped_in_measure']}. " + parts[0]
+        parts[0] = (ending + f"You reached {reached} of {report['notes_expected']} passage notes, "
+                    f"stopping in measure {report['stopped_in_measure']}. " + parts[0])
     bpm = report["tempo"]["estimated_bpm"]
     if bpm:
         target = report["tempo"]["target_bpm"]
@@ -297,7 +312,10 @@ def describe(report):
     sentences = [", ".join(parts) + "."]
     details = report["measure_details"]
     if not details:
-        sentences.append("Clean play-through. Try a little faster, or the next passage.")
+        if outcome == "completed":
+            sentences.append("No measured errors. Try a little faster, or the next passage.")
+        else:
+            sentences.append("No measured errors in the portion reached. Retry this passage to finish it.")
         return " ".join(sentences)
     worst = details[0]
     issues = []

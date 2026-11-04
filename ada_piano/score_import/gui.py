@@ -11,16 +11,14 @@ import webbrowser
 
 from ada_piano import pieces
 from ada_piano.ai_tutor import Tutor
-from ada_piano.ai_tutor.performance import PlayThrough, compare, describe, expected_notes
+from ada_piano.ai_tutor.performance import (MAX_PLAYED, MAX_TAKE_SECONDS, PlayThrough,
+                                           compare, describe, expected_notes)
 from ada_piano.music_sheet import note_name
 from ada_piano.playback import PlaybackNote
 from ada_piano.sound_sensor import NoteEvent
 from .conversion import ScoreImporter, score_parts
 from .review import ReviewedScore
 from ada_piano.agent.attempts import AttemptRecorder
-
-
-TAKE_SILENCE = 4.0  # seconds without keys before a play-through is scored
 
 
 def _piece_choices(catalog):
@@ -48,6 +46,7 @@ class ScorePanel(ttk.Frame):
         self.take_exercise = None
         self.take_context = None
         self.take_tempo = None
+        self.take_silence = 0.0
         self.latest_performance = None
         self.hand_analysis = None
         self.on_completed = None
@@ -57,6 +56,7 @@ class ScorePanel(ttk.Frame):
         self._choices = _piece_choices(self.catalog)
         self.choice = tk.StringVar(value=next(iter(self._choices), ""))
         self.show_import = tk.BooleanVar(value=False)
+        self.silence_seconds = tk.StringVar(value="0")
         self.activity_version = 0
         self._closed = False
         self._handled = None
@@ -78,7 +78,7 @@ class ScorePanel(ttk.Frame):
         self.feedback = tk.StringVar(value="Review and approve a passage to enable playback and practice.")
         self.path_label = tk.StringVar(value="No score loaded")
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+        self.rowconfigure(3, weight=1)
 
         quick = ttk.LabelFrame(self, text="Practice a checked piece (or say \"ADA, practice Für Elise\")", padding=6)
         quick.grid(row=0, column=0, sticky="ew")
@@ -88,10 +88,17 @@ class ScorePanel(ttk.Frame):
         ttk.Button(quick, text="Load piece", command=self.load_choice).pack(side="left", padx=4)
         self.take_button = ttk.Button(quick, text="Record play-through (F5)", command=self.play_through, state="disabled")
         self.take_button.pack(side="left")
+        recording = ttk.Frame(self)
+        recording.grid(row=1, column=0, sticky="ew", pady=3)
+        self.finish_button = ttk.Button(recording, text="Finish recording (F6)",
+                                        command=self.finish_take, state="disabled")
+        self.finish_button.pack(side="left")
+        ttk.Label(recording, text="Auto-finish silence (seconds, 0 = off):").pack(side="left", padx=6)
+        ttk.Spinbox(recording, textvariable=self.silence_seconds, from_=0, to=300, width=5).pack(side="left")
         ttk.Checkbutton(self, text="Show score import and review tools",
-                        variable=self.show_import, command=self._toggle_import).grid(row=1, column=0, sticky="w", pady=3)
+                        variable=self.show_import, command=self._toggle_import).grid(row=2, column=0, sticky="w", pady=3)
         body = self.import_tools = ttk.Frame(self)
-        body.grid(row=2, column=0, sticky="nsew")
+        body.grid(row=3, column=0, sticky="nsew")
         body.columnconfigure(0, weight=1)
         body.rowconfigure(5, weight=1)
 
@@ -159,9 +166,9 @@ class ScorePanel(ttk.Frame):
         self.practice_button = ttk.Button(actions, text="Start practice", command=self.practice, state="disabled")
         self.practice_button.pack(side="left", padx=4)
         ttk.Button(actions, text="Stop practice / sound", command=self.stop).pack(side="left")
-        ttk.Label(self, textvariable=self.feedback, wraplength=820).grid(row=3, column=0, sticky="w")
-        ttk.Label(self, textvariable=self.status, wraplength=820).grid(row=4, column=0, sticky="w")
-        ttk.Label(self, textvariable=self.path_label, wraplength=820).grid(row=5, column=0, sticky="w")
+        ttk.Label(self, textvariable=self.feedback, wraplength=820).grid(row=4, column=0, sticky="w")
+        ttk.Label(self, textvariable=self.status, wraplength=820).grid(row=5, column=0, sticky="w")
+        ttk.Label(self, textvariable=self.path_label, wraplength=820).grid(row=6, column=0, sticky="w")
         self._toggle_import()
         for variable in (self.part, self.staff, self.voice, self.first, self.last, self.written_order):
             variable.trace_add("write", self._invalidate)
@@ -207,7 +214,7 @@ class ScorePanel(ttk.Frame):
         hand_text = "both hands" if review.piece["hands"] == "both" else f"{review.piece['hands']} hand"
         text = (f"Loaded {piece.title}, {piece.passages[passage][2]}, {hand_text}. "
                 "Say \"play it for me\" to hear it first, or \"record\" when you're ready. "
-                "Pause for four seconds when you finish.")
+                "Say \"finish recording\" or press F6 when you finish.")
         self.status.set("Ready.")  # the instructions are already in the feedback line above
         self._say(text)
         return {"status": "loaded", "piece": piece.id, "title": piece.title, "passage": passage,
@@ -228,31 +235,35 @@ class ScorePanel(ttk.Frame):
         exercise = exercise if exercise is not None else self.loaded.exercise
         try:
             expected_notes(exercise)  # reject an over-long passage before the learner plays it
+            silence = float(self.silence_seconds.get())
+            if not 0 <= silence <= 300:
+                raise ValueError("Choose auto-finish silence from 0 to 300 seconds; 0 turns it off.")
         except ValueError as exc:
             self._say(str(exc))
             return False
         self.stop_practice()
         self.take = PlayThrough(monotonic())
+        self.take_silence = silence
+        self.finish_button.configure(state="normal")
         if self.hand_analysis is not None:
             self.hand_analysis.begin_take(self.take.started_at)
         self.take_exercise = exercise
         self.take_context = context if context is not None else self.loaded.context()
         if tempo is not None:
             self.take_tempo = tempo
-        self._say("Recording. Play when ready. Stop for four seconds when you finish.")
+        timeout = f" Auto-finish after {silence:g} seconds of silence is on." if silence else " Pauses will not end the take."
+        self._say("Recording. Play when ready. Say ADA finish recording, or press F6, when done." + timeout)
         return True
 
-    def finish_take(self):
-        """Score the current play-through; returns the report, or None if nothing was played."""
+    def finish_take(self, reason="finished"):
+        """Score and save the current play-through, including why recording ended."""
         take, self.take = self.take, None
         if take is None:
             return None
+        self.finish_button.configure(state="disabled")
         take.finish(monotonic())
         hands = self.hand_analysis.finish_take(take.ended_at) if self.hand_analysis is not None else None
-        if not take.notes:
-            self._say("Recording stopped. I didn't hear any notes.")
-            return None
-        report = compare(self.take_exercise, take.notes, target_bpm=self.take_tempo)
+        report = compare(self.take_exercise, take.notes, target_bpm=self.take_tempo, end_reason=reason)
         context = self.take_context
         self.latest_performance = {
             "session_id": str(uuid4()), "recorded_at": datetime.now(timezone.utc).isoformat(),
@@ -511,10 +522,10 @@ class ScorePanel(ttk.Frame):
         self._following_playback = False
         self._say("Your turn. Release held keys first. " + self.tutor.prompt())
 
-    def stop_practice(self):
+    def stop_practice(self, reason="finished"):
         self.activity_version += 1
         if self.take is not None:
-            self.finish_take()
+            self.finish_take(reason)
         if self.attempt is not None:
             self.attempt.finish()
             if self.hand_analysis is not None:
@@ -529,13 +540,20 @@ class ScorePanel(ttk.Frame):
     def stop(self):
         self.activity_version += 1
         self._following_playback = False
+        had_take = self.take is not None
         self.stop_practice()
         self.playback.stop()
-        self.feedback.set("Practice stopped.")
+        if not had_take:
+            self.feedback.set("Practice stopped.")
 
     def observe(self, event, source):
         if self.take is not None and source == "Piano":
+            if self.playback.player.status.state == "playing":
+                self.finish_take()
+                return
             self.take.observe(event.kind, event.note, event.velocity, event.channel, event.timestamp)
+            if len(self.take.notes) >= MAX_PLAYED:
+                self.finish_take("recording_limit_reached")
             return
         if self.tutor is None or source != "Piano":
             return
@@ -596,8 +614,14 @@ class ScorePanel(ttk.Frame):
                               "Recognized notes must be checked before you say approve passage.")
                 else:
                     self._say(status.detail)
-            if self.take is not None and self.take.idle_for(monotonic()) >= TAKE_SILENCE:
-                self.finish_take()
+            if self.take is not None:
+                now = monotonic()
+                if not self.connected():
+                    self.finish_take("disconnected")
+                elif now - self.take.started_at >= MAX_TAKE_SECONDS:
+                    self.finish_take("recording_limit_reached")
+                elif self.take_silence and self.take.idle_for(now) >= self.take_silence:
+                    self.finish_take("inactivity")
             if self.take is not None and self.playback.player.status.state == "playing":
                 self.finish_take()
                 self._say("Reference playing, so recording stopped.")

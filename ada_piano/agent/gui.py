@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import os
+import re
 from queue import Empty, Queue
 from threading import Event, Thread
 import tkinter as tk
@@ -21,6 +22,10 @@ from .tools import AgentTools, passage_context, select_passage
 
 NATURAL_VOICE = "Natural (offline)"
 SOUND_TOOLS = {"play_reference", "play_notes", "replay_my_playing"}
+LEARNING_PACE = .85  # while a piece is loaded ADA is teaching, so it speaks this much slower
+NOTATION_PACE = .7  # notes to play ("Play E5.") are the hardest to catch, so slower still
+# Note names with an octave, but not keys such as "press F6" or "F1 opens".
+NOTATION = re.compile(r"(?<![Pp]ress )(?<!presses )\b[A-G](?:[#♯b♭]| sharp| flat)?[0-8]\b(?! opens)")
 
 
 class CoachPanel(ttk.Frame):
@@ -46,6 +51,7 @@ class CoachPanel(ttk.Frame):
         self._identity = None
         self._pending_reference = None
         self._pending_practice = None
+        self._hand_question = None  # piece and passage while ADA waits for "right/left/both hands"
         self._reference_active = False
         self._reference_review = None
         self._turn_ready = None
@@ -115,7 +121,7 @@ class CoachPanel(ttk.Frame):
                                           values=("0.75", "0.85", "0.95", "1.00", "1.10", "1.15"),
                                           state="readonly", width=5)
         self.speed_selector.pack(side="left")
-        ttk.Label(speech_controls, text="× (cloud voices)").pack(side="left", padx=4)
+        ttk.Label(speech_controls, text="× (cloud and natural offline voices)").pack(side="left", padx=4)
         ttk.Button(speech_controls, text="Preview voice", command=self.preview_voice).pack(side="left", padx=5)
         self.voice_status = tk.StringVar(value="OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
         ttk.Label(bottom, textvariable=self.voice_status, wraplength=750).pack(anchor="w")
@@ -198,13 +204,21 @@ class CoachPanel(ttk.Frame):
         dialog.grab_set()
         key_entry.focus_set()
 
+    def _speed(self, text):
+        """The chosen speed, slower while a piece is being learned and slowest for notes to play."""
+        speed = float(self.voice_speed.get())
+        if NOTATION.search(text):
+            return max(.65, speed * NOTATION_PACE)
+        return max(.75, speed * LEARNING_PACE) if self.score.loaded is not None else speed
+
     def _say(self, text):
         self._listen_pending = False
         self.microphone.stop()
         self._microphone_mode = None
         if isinstance(self.voice, CloudVoiceService):
-            self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get(),
-                                 speed=float(self.voice_speed.get()))
+            self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get(), speed=self._speed(text))
+        elif isinstance(self.voice, piper_tts.PiperVoiceService):
+            self.voice.configure(speed=self._speed(text))
         self._speech_done = self.voice.say(text)
         return self._speech_done
 
@@ -223,6 +237,13 @@ class CoachPanel(ttk.Frame):
     def _local(self, question):
         """Handle offline commands; returns True when handled locally."""
         command = local_commands.parse(question, self.score.catalog)
+        # The hand question applies to the very next reply; naming another piece overrides it.
+        pending, self._hand_question = self._hand_question, None
+        hands = local_commands.hand_answer(question) if pending else None
+        if hands and (command is None or command[0] != "load"):
+            command = ("load", {**pending, "hands": hands})
+        elif pending and command is not None and command[0] == "repeat":
+            self._hand_question = pending
         if command is None:
             return False
         name, arguments = command
@@ -236,7 +257,7 @@ class CoachPanel(ttk.Frame):
         if name == "stop":
             take = getattr(self.score, "take", None)
             self.stop()
-            if take is None or not take.notes:  # otherwise stop() just announced the take's results
+            if take is None:  # otherwise stop() just announced the take's outcome
                 self.announce("Stopped.")
         elif name == "help":
             self.announce(local_commands.HELP)
@@ -248,6 +269,13 @@ class CoachPanel(ttk.Frame):
             self.announce(local_commands.list_text(self.score.catalog))
         elif name == "load":
             self.stop()
+            piece = pieces.find(arguments["piece"], self.score.catalog)
+            if arguments["hands"] is None and piece is not None and len(piece.hands) > 1:
+                self._hand_question = arguments
+                self.announce(f"{piece.title}. Which hand would you like to start with? "
+                              "Say right hand, left hand, or both hands.")
+                self.listen_after_speech()  # answer without saying ADA first
+                return True
             try:
                 self.score.load_piece(arguments["piece"], arguments["passage"], arguments["hands"])
             except ValueError as exc:
@@ -255,7 +283,17 @@ class CoachPanel(ttk.Frame):
         elif name == "record":
             self.voice.stop()
             self.score.play_through()
-        elif name == "results":
+        elif name == "auto_finish":
+            seconds = arguments["seconds"]
+            if getattr(self.score, "take", None) is not None:
+                self.announce("Finish recording before changing auto-finish.")
+            elif not 0 <= seconds <= 300:
+                self.announce("Choose auto-finish silence from 0 to 300 seconds; 0 turns it off.")
+            else:
+                self.score.silence_seconds.set(str(seconds))
+                self.announce(f"Auto-finish after {seconds} seconds of silence." if seconds else
+                              "Auto-finish off. Say finish recording or press F6 when done.")
+        elif name in {"results", "finish"}:
             if getattr(self.score, "take", None) is not None:
                 self.score.finish_take()
             else:
@@ -312,7 +350,8 @@ class CoachPanel(ttk.Frame):
                 self.announce("Choose a speaking speed from 0.75 to 1.15.")
                 return
             self.voice_speed.set(f"{speed:.2f}")
-            self.announce(f"Cloud speaking speed set to {speed:g}. Local voices use their own speaking speed.")
+            fixed = " The system voice keeps its own speed." if self.voice_choice.get() == "System (local)" else ""
+            self.announce(f"Speaking speed set to {speed:g}.{fixed}")
         elif name == "speech":
             enabled = arguments["enabled"]
             if enabled:
@@ -376,7 +415,7 @@ class CoachPanel(ttk.Frame):
             self.voice_status.set(self.voice.status)
         elif choice == "System (local)":
             self.voice = VoiceService()
-            self.voice_status.set("Local system voice selected.")
+            self.voice_status.set("Local system voice selected. Speech stays on this computer; speaking speed does not apply.")
         else:
             self.voice = CloudVoiceService()
             self.voice_status.set("OpenAI voice is AI-generated; enabling speech sends reply text and incurs API charges.")
@@ -451,7 +490,9 @@ class CoachPanel(ttk.Frame):
                 if command is None:
                     continue
                 name, question = command
-                if mode == "guarded" and name != "stop":
+                finish = (self.local_commands and getattr(self.score, "take", None) is not None
+                          and local_commands.parse(question, self.score.catalog) == ("finish", {}))
+                if mode == "guarded" and name != "stop" and not finish:
                     continue
             if command is not None and command[0] == "stop":
                 disable = "stop listening" in text.lower()
@@ -461,7 +502,7 @@ class CoachPanel(ttk.Frame):
                 self.stop()
                 if disable:
                     self.announce("Stopped. Microphone off. Press F1 to speak again.")
-                elif take is None or not take.notes:
+                elif take is None:
                     self.announce("Stopped.")
                 return
             self.text.set(command[1] if command is not None else text)
@@ -489,7 +530,7 @@ class CoachPanel(ttk.Frame):
             if automatic and self._input_notice != "unavailable":
                 self._input_notice = "unavailable"
                 self.announce(self.microphone.status + " Press F1 to retry, or type and press Enter.")
-        self.microphone_status.set(("Listening for ADA stop while sound or practice is active. "
+        self.microphone_status.set(("Listening for ADA stop or ADA finish recording while practice is active. "
                                     if mode == "guarded" and self.microphone.available else "") + self.microphone.status)
 
     def _append(self, speaker, text):

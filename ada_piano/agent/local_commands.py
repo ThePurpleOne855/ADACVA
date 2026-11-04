@@ -10,13 +10,14 @@ import re
 from ada_piano import pieces
 
 HELP = ("Say list pieces, then practice a piece by name. Say play it for me, guided practice, "
-        "or record. Pause four seconds for results. Say list MIDI inputs, select MIDI input one, "
+        "or record. Say finish recording or press F6 for results. Say list MIDI inputs, select MIDI input one, "
         "or connect piano. Say start camera, calibrate hands, or hand report. "
         "Say help settings for more controls. While playing or hearing ADA, say ADA stop. "
         "F1 opens the microphone; Escape stops; Tab moves between controls.")
 SETTINGS_HELP = ("Say status, repeat, list MIDI outputs, select MIDI output one, list cameras, "
                  "select camera one, tempo sixty, slower, faster, measures one to four, "
                  "right hand, left hand, or both hands. Say save session, show tools, hide tools, bigger text, smaller text, "
+                 "auto finish after thirty seconds, disable auto finish, "
                  "list voices, use system voice, speech speed one, stop listening, or quit. "
                  "For imports, say list score files, import score one, list score options, "
                  "review passage, next measure, then approve passage after checking the notes.")
@@ -32,7 +33,8 @@ _RECORD = re.compile(r"\b(record|recording|ready|let me (play|try)|start|play th
 _RESULTS = re.compile(r"\b(how did i do|how was (that|it)|results?|feedback|score me|grade)\b")
 _QUESTION = re.compile(r"\b(why|what|how|who|when|where|tell|about|history|explain|which|is|are|was|does|hard|easy|love|like|famous|favorite|favourite)\b")
 _HANDS = {"right": re.compile(r"\bright\b"), "left": re.compile(r"\bleft\b"),
-          "both": re.compile(r"\b(both|two) hands?\b")}
+          "both": re.compile(r"\b(both|two hands?)\b")}
+_ASKING = re.compile(r"^(what|which|how|why|is|are|can|could|should|does|do|will|would)\b")
 
 
 def _plain(text):
@@ -78,9 +80,17 @@ def _controls(plain):
         "next measure": "review_next", "approve passage": "approve_score", "approve score": "approve_score",
         "cancel import": "cancel_import",
         "list score options": "score_options",
+        "finish recording": "finish", "finish take": "finish", "done recording": "finish",
     }
     if plain in commands:
         return commands[plain], {}
+    if plain in {"disable auto finish", "auto finish off"}:
+        return "auto_finish", {"seconds": 0}
+    match = re.fullmatch(r"auto finish after (.+) seconds?", plain)
+    if match:
+        seconds = _number(match[1])
+        if seconds is not None:
+            return "auto_finish", {"seconds": seconds}
     match = re.fullmatch(r"calibrate (?:my )?(left|right)(?: hand)?", plain)
     if match:
         return "calibrate", {"hand": match[1]}
@@ -182,6 +192,15 @@ def parse(text, catalog):
     if _RECORD.search(plain) and short and not _QUESTION.search(plain):
         return "record", {}
     return None
+
+
+def hand_answer(text):
+    """The hand named in a short reply such as "left", "right hand" or "both", else None."""
+    plain = re.sub(r"^(?:hey )?(?:ada|aida|a da) ", "", _plain(text))
+    if len(plain.split()) > 6 or _ASKING.match(plain):
+        return None
+    named = [hand for hand, pattern in _HANDS.items() if pattern.search(plain)]
+    return named[0] if len(named) == 1 else None
 
 
 def list_text(catalog):

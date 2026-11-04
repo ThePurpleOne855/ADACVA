@@ -5,6 +5,7 @@ a temporary WAV and played by the native player, which stop() terminates.
 """
 from collections import deque
 import importlib.util
+import math
 import os
 from pathlib import Path
 import re
@@ -67,11 +68,14 @@ class PiperVoiceService:
         self._model_path = Path(model) if model else model_path()
         has_player = self._command("probe.wav") is not None
         self.available = has_player and (loader is not None or available(self._model_path))
-        self.status = ("Natural offline voice ready." if self.available else
+        self.status = ("Natural offline voice ready. Speech is generated on this computer; "
+                       "no text is sent and there are no API charges." if self.available else
                        "Audio player unavailable; continuing in text mode."
                        if not has_player else
                        "Offline voice not installed; run: uv run ada-piano voice-setup")
         self._voice = None
+        self._base_length = 1.0
+        self._speed = 1.0
         self._condition = Condition()
         self._queue = deque()
         self._process = None
@@ -79,6 +83,13 @@ class PiperVoiceService:
         self._generation = 0
         self._thread = Thread(target=self._run, name="ada-piper-voice", daemon=True)
         self._thread.start()
+
+    def configure(self, *, speed=1.0):
+        """Speaking speed multiplier, same 0.65-1.15 range as cloud voices; lower is calmer."""
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or not .65 <= speed <= 1.15:
+            raise ValueError("Speech speed must be between 0.65 and 1.15")
+        with self._condition:
+            self._speed = float(speed)
 
     def say(self, text, *, replace=True):
         done = Event()
@@ -121,6 +132,7 @@ class PiperVoiceService:
             else:
                 from piper import PiperVoice
                 self._voice = PiperVoice.load(str(self._model_path))
+            self._base_length = self._voice.config.length_scale
         return self._voice
 
     def _run(self):
@@ -138,9 +150,13 @@ class PiperVoiceService:
                     if self._closed:
                         return
                     text, done, generation = self._queue.popleft()
+                    speed = self._speed
                 try:
+                    voice = self._load()
+                    # Piper uses the model's length_scale when no SynthesisConfig is given; longer is slower.
+                    voice.config.length_scale = self._base_length / speed
                     with wave.open(str(path), "wb") as output:
-                        self._load().synthesize_wav(text, output)
+                        voice.synthesize_wav(text, output)
                     with self._condition:
                         if generation != self._generation or self._closed:
                             continue

@@ -126,6 +126,10 @@ def main() -> int:
             camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             camera.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
             camera.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
+            window = "ADA hand tracking - press q to quit"
+            if not args.no_preview:
+                cv2.namedWindow(window, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+                cv2.resizeWindow(window, 1600, 900)
             started = time.monotonic()
             last_timestamp_ms = -1
             frames = 0
@@ -148,7 +152,7 @@ def main() -> int:
                         log.write(json.dumps(observation(result, timestamp_ms, captured_monotonic_ns,
                                                          frame.shape[1], frame.shape[0])) + "\n")
                     if not args.no_preview:
-                        cv2.imshow("ADA hand tracking - press q to quit", annotate(frame, result, cv2, mp))
+                        cv2.imshow(window, annotate(frame, result, cv2, mp))
                         if cv2.waitKey(1) & 0xFF == ord("q"):
                             break
             except KeyboardInterrupt:
