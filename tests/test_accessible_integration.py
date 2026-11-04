@@ -35,6 +35,7 @@ class AccessibleIntegrationTests(unittest.TestCase):
         self.backend = FakeBackend()
         self.voice, self.microphone = FakeVoice(), FakeMicrophone()
         with patch("ada_piano.camera.gui.best_camera", return_value=(0, "Camera 0")), \
+                patch("ada_piano.note_reader.gui.has_camera", return_value=False), \
                 patch("ada_piano.agent.gui.CoachPanel.use_best_voice"):
             self.window = existing.NoteReaderWindow(self.root, reader=NoteReader(self.backend),
                 player=ReferencePlayer(FakeOutputBackend(), message_factory=message),
@@ -65,12 +66,30 @@ class AccessibleIntegrationTests(unittest.TestCase):
         self.assertEqual(w.home.winfo_manager(), "pack")
         self.assertEqual(w.home.entry.get(), "")
 
+    def test_practice_asks_which_hand_to_start_with(self):
+        w = self.window
+        self.say("practice fur elise")
+        self.assertIsNone(w.score.loaded)
+        self.assertIn("Which hand would you like to start with?", self.voice.messages[-1])
+        self.assertTrue(self.microphone.running)  # answer without saying ADA first
+        self.say("say that again")
+        self.assertIn("Which hand", self.voice.messages[-1])
+        self.say("left")
+        self.assertEqual(w.score.loaded.piece["hands"], "left")
+        self.assertIn("left hand", self.voice.messages[-1])
+        # A named hand or a one-hand piece loads at once; naming another piece overrides the question.
+        self.say("practice fur elise right hand")
+        self.assertEqual(w.score.loaded.piece["hands"], "right")
+        self.say("practice fur elise")
+        self.say("practice ode to joy")
+        self.assertEqual((w.score.loaded.piece["id"], w.score.loaded.piece["hands"]), ("ode_to_joy", "right"))
+
     def test_voice_selects_devices_tempo_and_approved_measures(self):
         self.say("list MIDI inputs")
         self.assertIn("1: USB MIDI", self.voice.messages[-1])
         self.say("select MIDI input one")
         self.assertTrue(self.window.reader.connected)
-        self.say("practice fur elise")
+        self.say("practice fur elise both hands")
         self.say("measures one to two")
         self.assertEqual({e.measure for e in self.window.score.loaded.exercise.events}, {"1", "2"})
         self.say("left hand")
@@ -109,7 +128,7 @@ class AccessibleIntegrationTests(unittest.TestCase):
             return {item.measure for item in (*exercise.events, *exercise.rests)}
 
         self.say("select MIDI input one")
-        self.say("practice fur elise")
+        self.say("practice fur elise both hands")
         self.say("measures one to two")
         first = self.record_take()
         self.assertEqual((first["correct"], first["notes_expected"]), (13, 13))
@@ -289,6 +308,7 @@ class PianoAutoSetupTests(unittest.TestCase):
         self.backend, self.outputs, self.voice = FakeBackend(), FakeOutputBackend(), FakeVoice()
         self.backend.names, self.outputs.names = list(inputs), list(outputs)
         with patch("ada_piano.camera.gui.best_camera", return_value=(0, "Camera 0")), \
+                patch("ada_piano.note_reader.gui.has_camera", return_value=False), \
                 patch("ada_piano.agent.gui.CoachPanel.use_best_voice"):
             self.window = existing.NoteReaderWindow(self.root, reader=NoteReader(self.backend),
                 player=ReferencePlayer(self.outputs, message_factory=message),

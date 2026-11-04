@@ -85,9 +85,9 @@ class PiperVoiceService:
         self._thread.start()
 
     def configure(self, *, speed=1.0):
-        """Speaking speed multiplier, same 0.75-1.15 range as cloud voices; lower is calmer."""
-        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or not .75 <= speed <= 1.15:
-            raise ValueError("Speech speed must be between 0.75 and 1.15")
+        """Speaking speed multiplier, same 0.65-1.15 range as cloud voices; lower is calmer."""
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or not .65 <= speed <= 1.15:
+            raise ValueError("Speech speed must be between 0.65 and 1.15")
         with self._condition:
             self._speed = float(speed)
 

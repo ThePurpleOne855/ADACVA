@@ -10,6 +10,7 @@ from ada_piano.music_sheet import note_name
 from ada_piano.note_reader import NoteEvent, NoteReader
 from ada_piano.note_reader.keyboard import PianoKeyboard
 from ada_piano.playback.gui import PlaybackPanel
+from ada_piano.camera.devices import has_camera
 from ada_piano.camera.gui import CameraPanel
 from ada_piano.score_import.gui import ScorePanel
 from ada_piano.agent.gui import CoachPanel
@@ -60,7 +61,7 @@ class NoteReaderWindow:
         self.workspace.add(panes, text="Piano & Camera")
         frame = ttk.Frame(panes, padding=16)
         panes.add(frame, weight=3)
-        self.camera = CameraPanel(panes, worker=camera_worker, on_frame=self.hands.add_frame,
+        self.camera = CameraPanel(panes, worker=camera_worker, on_frame=self._camera_frame,
                                   on_reset=self._camera_reset)
         panes.add(self.camera, weight=2)
         self._heading = ttk.Label(frame, text="Note Reader", font=("", 24, "bold"))
@@ -124,14 +125,16 @@ class NoteReaderWindow:
             self.home = AccessibleView(root, submit=self.submit, talk=self.talk, stop=self.stop_all,
                                        tools=self.toggle_tools, status=self.home_status)
             self.home.pack(fill="both", expand=True)
+            self.home.practice.camera_button.configure(command=self.toggle_camera)
+            self.home.practice.keyboard.on_note = self._play_key
             self.coach.on_message = self.home.append
             for key, step in (("<Control-plus>", 1), ("<Control-equal>", 1), ("<Control-KP_Add>", 1),
                               ("<Control-minus>", -1), ("<Control-KP_Subtract>", -1), ("<Control-0>", 0)):
                 root.bind(key, lambda event, step=step: self.text_size(step) or "break")
             for number, (room, _) in enumerate(ROOMS, 1):  # Ctrl+1 Practice ... Ctrl+5 Voice & AI
                 root.bind(f"<Control-Key-{number}>", lambda event, room=room: self.open_room(room) or "break")
-            self.root.geometry("900x700")
-            self.root.minsize(700, 540)
+            self.root.geometry("1400x900")
+            self.root.minsize(1000, 760)
             self.coach.use_best_voice()
             self.coach.wake_default = self.coach.wake_word = True  # always listening for "ADA ..."
             self.coach.speak.set(True)
@@ -151,6 +154,7 @@ class NoteReaderWindow:
         self._letter_tools()
         self._next_scan = monotonic() + 3
         self._timer = root.after(20, self._tick)
+        self._maybe_auto_start_camera()
 
     def greet(self, piano=""):
         """ADA opens the session: ask what to practice and read the catalog."""
@@ -198,12 +202,19 @@ class NoteReaderWindow:
         else:
             self.workspace.pack_forget()
             self.home.pack(fill="both", expand=True)
-            self.root.minsize(700, 540)
-            self.root.geometry("900x700")
+            self._size_home()
+            self.root.geometry("1400x900")
             self.home.focus_message()
         self._announce("Tools open. Press F3 or say hide tools to return." if self.tools_visible else "Practice screen.")
 
+    def _camera_frame(self, frame):
+        self.hands.add_frame(frame)
+        if self.home is not None:
+            self.home.practice.show_frame(frame)
+
     def _camera_reset(self, reason):
+        if self.home is not None:
+            self.home.practice.clear_camera()
         previously_ready = self.hands.calibrated or self.hands.calibrating
         message = self.hands.reset(reason)
         if previously_ready and hasattr(self, "coach"):
@@ -305,10 +316,16 @@ class NoteReaderWindow:
         if self.home is None:
             return "Text size applies to the practice screen."
         scale = self.home.change_scale(step)
+        self._size_home()
         self._letter_tools()
         reply = f"Text size {round(scale * 100)} percent."
         self._announce(reply)
         return reply
+
+    def _size_home(self):
+        scale = self.home.scale
+        self.root.minsize(min(round(1000 * scale), 1400, self.root.winfo_screenwidth()),
+                          min(round(760 * scale), 900, self.root.winfo_screenheight() - 80))
 
     def _letter_tools(self):
         """Tab labels and the main heading in the plate's smooth type, at the chosen text size."""
@@ -376,6 +393,11 @@ class NoteReaderWindow:
     def toggle_camera(self):
         self._announce(self.camera_voice(not self.camera.worker.running))
 
+    def _maybe_auto_start_camera(self):
+        """Connect the camera on launch when one is plugged in (or configured)."""
+        if has_camera():
+            self._announce(self.camera_voice(True))
+
     def _watch_camera(self):
         """Speak the camera outcome after a voice/F7 start: error, no hands, then hands seen."""
         if self._camera_said is None:
@@ -427,6 +449,12 @@ class NoteReaderWindow:
 
     def _show_state(self):
         state = self.reader.state
+        if self.home is not None:
+            self._sync_practice()
+            self.home.practice.render(self._piece_line(), state.held, self._last_played,
+                                      tuple(note for channel, note in self.playback.active),
+                                      self.reader.connected, self.demo)
+            self.home.practice.camera_state(self.camera.status.get(), self.camera.worker.running)
         keys = ", ".join(f"{note_name(note)} (ch {channel})" for channel, note in sorted(state.held))
         self.held.set("Held keys: " + (keys or "none"))
         channels = ", ".join(map(str, sorted(state.sustain)))
@@ -566,7 +594,17 @@ class NoteReaderWindow:
         self.tabs.select(self.playback)
         self.playback.play_note(pitch)
 
+    def _sync_practice(self):
+        score = self.score
+        exercise = (score.tutor.exercise if score.tutor is not None else score.take_exercise
+                    if score.take is not None else score.loaded.exercise if score.loaded is not None else None)
+        self.home.practice.follow.sync(exercise, score.activity_version)
+
     def _record(self, event, source="Piano"):
+        if self.home is not None:
+            self._sync_practice()
+            if self.playback.player.status.state != "playing":
+                self.home.practice.follow.observe(event, source)
         if source == "Piano":
             self.hands.observe(event.kind, event.note, event.velocity, event.channel, event.timestamp)
         self.score.observe(event, source)

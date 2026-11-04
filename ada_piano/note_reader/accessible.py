@@ -183,7 +183,7 @@ class AccessibleView(tk.Frame):
         self.tools_button._ring.pack(side="bottom", anchor="w", padx=CELL // 3, pady=(0, CELL))
 
         main = self._main = tk.Frame(self, background=PLATE)
-        main.pack(side="left", fill="both", expand=True, padx=(CELL * 2, CELL * 2), pady=CELL)
+        main.pack(side="left", fill="both", expand=True, padx=CELL, pady=CELL)
         self.bind("<Configure>", self._view_resized)
         rooms = self._rooms = tk.Frame(main, background=PLATE)
         inner = self._inner = tk.Frame(rooms, background=PLATE)
@@ -268,10 +268,9 @@ class AccessibleView(tk.Frame):
         # Packing order is priority: controls, state and ADA's words keep their room first;
         # the takes, packed last, yield space before ADA's words do.
         bar.pack(side="bottom", fill="x", pady=(CELL // 2, 0))
-        words.pack(side="top", fill="both", expand=True)  # ADA's words take every spare line
-        takes.pack(side="bottom", fill="x", pady=(CELL // 2, 0))
-        state.pack(side="top", fill="x", pady=(CELL // 2, CELL // 2))  # what ADA is doing, in every room
-        self.status_label.pack(side="top", fill="x", pady=(0, CELL // 2))
+        from ada_piano.note_reader.practice import PracticePanel
+        self.practice = PracticePanel(inner, self)
+        self.practice.pack(side="top", fill="both", expand=True)
         rooms.pack(side="top", fill="both", expand=True)
 
         self._status_trace = status.trace_add("write", self._show_status)
@@ -319,7 +318,8 @@ class AccessibleView(tk.Frame):
 
     def _rail_width(self):
         width = self.winfo_width()
-        return int(min(max((width if width > 50 else 928) * 0.31, 210), 380)) - CELL
+        return int(min(max((width if width > 50 else 928) * 0.24, 190 * self.scale),
+                       280 * self.scale)) - CELL
 
     def _render_rail(self):
         width = self._rail_width()
@@ -461,18 +461,8 @@ class AccessibleView(tk.Frame):
         self._rendered["status"] = key
         lettering.letter(self.state_label, word, self._size(50), AMBER if live else INK, weight="bold")
         self._draw_lamp(live)
-        plain = re.sub(r"[^a-z ]", "", text.lower()).strip()
-        if not plain or plain == word.lower() or word not in SUBLINE or self._compact():
-            self.status_label.pack_forget()  # the state word already says it, or the room is ADA's
-            return
-        if not self.status_label.winfo_manager():
-            self.status_label.pack(side="top", fill="x", pady=(0, CELL // 2), before=self._rooms)
-        if self._smooth:
-            image = lettering.photo(self.status_label, text, self._size(24), SLATE, width=width, max_lines=2)
-            self.status_label.configure(image=image, compound="none")
-            self.status_label._lettering = image
-        else:
-            self.status_label.configure(wraplength=width, font=("", 11))
+        # Voice status stays available as native text without displacing the piano.
+        self.status_label.pack_forget()
 
     def _show_context(self):
         width = self._text_width()
@@ -565,7 +555,7 @@ class AccessibleView(tk.Frame):
 
     def _compact(self):
         height = self.winfo_height()
-        return 1 < height < COMPACT_HEIGHT
+        return 1 < height < COMPACT_HEIGHT * self.scale
 
     def _resized(self, event):
         compact = self._compact()
@@ -573,10 +563,6 @@ class AccessibleView(tk.Frame):
             return
         self._width, self._compact_drawn = event.width, compact
         self._rendered.pop("status", None)
-        if compact:
-            self._takes_frame.pack_forget()  # never squeezed into cut glyphs; the note moves under ADA's words
-        elif not self._takes_frame.winfo_manager():
-            self._takes_frame.pack(side="bottom", fill="x", pady=(CELL // 2, 0), after=self._words)
         self._show_words(force=True)
         self._show_status()
         self._show_context()

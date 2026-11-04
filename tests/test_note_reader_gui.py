@@ -66,6 +66,9 @@ class NoteReaderGuiTests(unittest.TestCase):
         camera_pick = patch("ada_piano.camera.gui.best_camera", return_value=(0, "Camera 0"))
         camera_pick.start()
         self.addCleanup(camera_pick.stop)
+        camera_present = patch("ada_piano.note_reader.gui.has_camera", return_value=False)
+        camera_present.start()
+        self.addCleanup(camera_present.stop)
         self.window = NoteReaderWindow(self.root, reader=self.reader, player=self.player,
                                        camera_worker=self.camera_worker)
         # Withdrawn test windows do not receive the canvas Configure event.

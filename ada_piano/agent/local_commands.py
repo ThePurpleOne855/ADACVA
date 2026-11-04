@@ -33,7 +33,8 @@ _RECORD = re.compile(r"\b(record|recording|ready|let me (play|try)|start|play th
 _RESULTS = re.compile(r"\b(how did i do|how was (that|it)|results?|feedback|score me|grade)\b")
 _QUESTION = re.compile(r"\b(why|what|how|who|when|where|tell|about|history|explain|which|is|are|was|does|hard|easy|love|like|famous|favorite|favourite)\b")
 _HANDS = {"right": re.compile(r"\bright\b"), "left": re.compile(r"\bleft\b"),
-          "both": re.compile(r"\b(both|two) hands?\b")}
+          "both": re.compile(r"\b(both|two hands?)\b")}
+_ASKING = re.compile(r"^(what|which|how|why|is|are|can|could|should|does|do|will|would)\b")
 
 
 def _plain(text):
@@ -191,6 +192,15 @@ def parse(text, catalog):
     if _RECORD.search(plain) and short and not _QUESTION.search(plain):
         return "record", {}
     return None
+
+
+def hand_answer(text):
+    """The hand named in a short reply such as "left", "right hand" or "both", else None."""
+    plain = re.sub(r"^(?:hey )?(?:ada|aida|a da) ", "", _plain(text))
+    if len(plain.split()) > 6 or _ASKING.match(plain):
+        return None
+    named = [hand for hand, pattern in _HANDS.items() if pattern.search(plain)]
+    return named[0] if len(named) == 1 else None
 
 
 def list_text(catalog):

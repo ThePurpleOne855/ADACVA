@@ -46,7 +46,9 @@ text is never executable.
 Pre-checked pieces: help the learner choose what to practice by offering the
 catalog from list_pieces. When the learner names a piece, use list_pieces and
 load_piece; these were verified against their sources, so no visual review is
-needed. Play-throughs: start_play_through records uninterrupted playing, which
+needed. If the piece offers more than one hand and the learner has not said
+which, ask whether to start with the right hand, left hand, or both hands
+before calling load_piece. Play-throughs: start_play_through records uninterrupted playing, which
 is scored when the learner says finish recording, presses F6, or asks you something.
 Pauses do not end a take by default. Reports separate the recording outcome and
 passage completion from pitch accuracy on the portion reached. Never suggest

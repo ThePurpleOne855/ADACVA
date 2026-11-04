@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from ada_piano.camera.controller import CameraController
-from ada_piano.camera.devices import camera_choices
+from ada_piano.camera.devices import camera_choices, has_camera
 
 
 class DelayedWorker:
@@ -96,3 +96,25 @@ class CameraSelectionTests(unittest.TestCase):
             choices = camera_choices(Path(root))
             self.assertEqual(choices["Camera 0"], 0)
             self.assertEqual(choices["Camera 1"], 1)
+
+    def test_has_camera_detects_capture_nodes(self):
+        with TemporaryDirectory() as root:
+            root = Path(root)
+            self.assertFalse(has_camera(root, {}))
+            (root / "video2").mkdir()
+            (root / "video2" / "name").write_text("Brio 100")
+            (root / "video2" / "index").write_text("0")
+            self.assertTrue(has_camera(root, {}))
+
+    def test_has_camera_ignores_metadata_nodes(self):
+        with TemporaryDirectory() as root:
+            root = Path(root)
+            (root / "video3").mkdir()
+            (root / "video3" / "name").write_text("Brio 100")
+            (root / "video3" / "index").write_text("1")
+            self.assertFalse(has_camera(root, {}))
+
+    def test_has_camera_honors_configured_source(self):
+        with TemporaryDirectory() as root:
+            self.assertTrue(has_camera(Path(root), {"ADA_CAMERA": "2"}))
+            self.assertFalse(has_camera(Path(root), {"ADA_CAMERA": "-1"}))

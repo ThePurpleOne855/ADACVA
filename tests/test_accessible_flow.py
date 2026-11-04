@@ -9,7 +9,7 @@ from test_agent_gui import FakeVoice
 from test_note_reader import note
 
 from ada_piano import pieces
-from ada_piano.agent.local_commands import parse
+from ada_piano.agent.local_commands import hand_answer, parse
 from ada_piano.agent.tools import AgentTools
 
 ODE = [64, 64, 65, 67, 67, 65, 64, 62, 60, 60, 62, 64, 64, 62, 62,
@@ -225,6 +225,14 @@ class CommandTests(unittest.TestCase):
             with self.subTest(text=text):
                 result = parse(text, catalog)
                 self.assertEqual(result and result[0], expected)
+
+    def test_hand_answers(self):
+        cases = {"left": "left", "Right hand.": "right", "both": "both", "ADA, start with my left hand": "left",
+                 "two hands": "both", "the right one please": "right", "left or right": None,
+                 "Is the left hand harder?": None, "which hand is easier": None, "record": None}
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(hand_answer(text), expected)
 
 
 class ToolTests(unittest.TestCase):

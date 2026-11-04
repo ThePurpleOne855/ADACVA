@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import os
+import re
 from queue import Empty, Queue
 from threading import Event, Thread
 import tkinter as tk
@@ -21,6 +22,10 @@ from .tools import AgentTools, passage_context, select_passage
 
 NATURAL_VOICE = "Natural (offline)"
 SOUND_TOOLS = {"play_reference", "play_notes", "replay_my_playing"}
+LEARNING_PACE = .85  # while a piece is loaded ADA is teaching, so it speaks this much slower
+NOTATION_PACE = .7  # notes to play ("Play E5.") are the hardest to catch, so slower still
+# Note names with an octave, but not keys such as "press F6" or "F1 opens".
+NOTATION = re.compile(r"(?<![Pp]ress )(?<!presses )\b[A-G](?:[#♯b♭]| sharp| flat)?[0-8]\b(?! opens)")
 
 
 class CoachPanel(ttk.Frame):
@@ -46,6 +51,7 @@ class CoachPanel(ttk.Frame):
         self._identity = None
         self._pending_reference = None
         self._pending_practice = None
+        self._hand_question = None  # piece and passage while ADA waits for "right/left/both hands"
         self._reference_active = False
         self._reference_review = None
         self._turn_ready = None
@@ -198,15 +204,21 @@ class CoachPanel(ttk.Frame):
         dialog.grab_set()
         key_entry.focus_set()
 
+    def _speed(self, text):
+        """The chosen speed, slower while a piece is being learned and slowest for notes to play."""
+        speed = float(self.voice_speed.get())
+        if NOTATION.search(text):
+            return max(.65, speed * NOTATION_PACE)
+        return max(.75, speed * LEARNING_PACE) if self.score.loaded is not None else speed
+
     def _say(self, text):
         self._listen_pending = False
         self.microphone.stop()
         self._microphone_mode = None
         if isinstance(self.voice, CloudVoiceService):
-            self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get(),
-                                 speed=float(self.voice_speed.get()))
+            self.voice.configure(api_key=self._api_key, voice=self.voice_choice.get(), speed=self._speed(text))
         elif isinstance(self.voice, piper_tts.PiperVoiceService):
-            self.voice.configure(speed=float(self.voice_speed.get()))
+            self.voice.configure(speed=self._speed(text))
         self._speech_done = self.voice.say(text)
         return self._speech_done
 
@@ -225,6 +237,13 @@ class CoachPanel(ttk.Frame):
     def _local(self, question):
         """Handle offline commands; returns True when handled locally."""
         command = local_commands.parse(question, self.score.catalog)
+        # The hand question applies to the very next reply; naming another piece overrides it.
+        pending, self._hand_question = self._hand_question, None
+        hands = local_commands.hand_answer(question) if pending else None
+        if hands and (command is None or command[0] != "load"):
+            command = ("load", {**pending, "hands": hands})
+        elif pending and command is not None and command[0] == "repeat":
+            self._hand_question = pending
         if command is None:
             return False
         name, arguments = command
@@ -250,6 +269,13 @@ class CoachPanel(ttk.Frame):
             self.announce(local_commands.list_text(self.score.catalog))
         elif name == "load":
             self.stop()
+            piece = pieces.find(arguments["piece"], self.score.catalog)
+            if arguments["hands"] is None and piece is not None and len(piece.hands) > 1:
+                self._hand_question = arguments
+                self.announce(f"{piece.title}. Which hand would you like to start with? "
+                              "Say right hand, left hand, or both hands.")
+                self.listen_after_speech()  # answer without saying ADA first
+                return True
             try:
                 self.score.load_piece(arguments["piece"], arguments["passage"], arguments["hands"])
             except ValueError as exc:
