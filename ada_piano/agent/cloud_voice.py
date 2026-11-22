@@ -79,8 +79,8 @@ class CloudVoiceService:
     def configure(self, *, api_key=None, voice=DEFAULT_VOICE, speed=DEFAULT_SPEED):
         if voice not in VOICES:
             raise ValueError("Unknown speech voice")
-        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or not .75 <= speed <= 1.15:
-            raise ValueError("Speech speed must be between 0.75 and 1.15")
+        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or not .65 <= speed <= 1.15:
+            raise ValueError("Speech speed must be between 0.65 and 1.15")
         with self._lock:
             self._api_key, self._voice = api_key, voice
             self._speed = float(speed)

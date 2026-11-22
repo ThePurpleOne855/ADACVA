@@ -2,6 +2,7 @@
 from pathlib import Path
 import tempfile
 from threading import Event
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -48,9 +49,12 @@ class CameraSelectionTests(unittest.TestCase):
 class FakePiper:
     def __init__(self):
         self.texts = []
+        self.config = SimpleNamespace(length_scale=1.2)  # model default, as in the voice's .onnx.json
+        self.lengths = []
 
     def synthesize_wav(self, text, output):
         self.texts.append(text)
+        self.lengths.append(self.config.length_scale)
         output.setnchannels(1)
         output.setsampwidth(2)
         output.setframerate(22050)
@@ -74,6 +78,21 @@ class PiperTests(unittest.TestCase):
         done = slow.say("long")
         slow.stop()
         self.assertTrue(done.wait(3))
+
+    def test_speaking_speed_scales_the_model_default(self):
+        fake = FakePiper()
+        service = piper_tts.PiperVoiceService("model.onnx", player=lambda path: ["true"], loader=lambda path: fake)
+        self.addCleanup(service.close)
+        self.assertIn("no API charges", service.status)
+        self.assertTrue(service.say("default").wait(5))
+        service.configure(speed=.8)
+        self.assertTrue(service.say("calmer").wait(5))
+        service.configure(speed=1.15)
+        self.assertTrue(service.say("quicker").wait(5))
+        self.assertEqual([round(n, 3) for n in fake.lengths], [1.2, 1.5, 1.043])
+        for speed in (.5, 1.2, float("nan"), float("inf"), True, "1"):
+            with self.subTest(speed=speed), self.assertRaises(ValueError):
+                service.configure(speed=speed)
 
     def test_missing_model_reports_setup_command(self):
         with patch.dict("os.environ", {"ADA_PIPER_VOICE": "/nonexistent/voice.onnx"}):

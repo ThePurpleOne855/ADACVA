@@ -186,7 +186,7 @@ class TakeEvidenceTests(unittest.TestCase):
 
     def test_state_words(self):
         from ada_piano.note_reader.accessible import state_word
-        self.assertEqual(state_word("Recording. Pause four seconds for results; say ADA stop to finish."),
+        self.assertEqual(state_word("Recording. Say ADA finish recording or press F6 for results; Escape stops."),
                          ("Recording", True))
         self.assertEqual(state_word("Listening for one question; pause when finished."), ("Listening", True))
         self.assertEqual(state_word("ADA is thinking. Say ADA stop or press Escape to cancel."), ("Thinking", True))

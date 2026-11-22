@@ -35,6 +35,28 @@ def camera_choices(device_root=Path("/sys/class/video4linux")):
     return {label: index for index, label in sorted(choices.items())}
 
 
+def has_camera(device_root=Path("/sys/class/video4linux"), environ=os.environ):
+    """A camera is plugged in (or ADA_CAMERA names one), so auto-connect may try."""
+    configured = environ.get("ADA_CAMERA", "").strip()
+    if configured:
+        try:
+            parse_camera_source(configured)
+            return True
+        except ValueError:
+            pass  # a bad setting must not trigger auto-connect; check devices instead
+    for device in device_root.glob("video*"):
+        if not device.name.removeprefix("video").isdigit():
+            continue
+        try:
+            # Each webcam also exposes metadata nodes (index 1+) that cannot capture video.
+            if (device / "index").read_text().strip() not in ("", "0"):
+                continue
+        except OSError:
+            pass
+        return True
+    return False
+
+
 def best_camera(device_root=Path("/sys/class/video4linux"), environ=os.environ):
     """Pick the simplest working source: ADA_CAMERA, then an external USB webcam, then built-in.
 
